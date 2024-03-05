@@ -1,16 +1,26 @@
-import { ChartNode, NodeConnection, NodeId, NodeInputDefinition, NodeOutputDefinition, PortId } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { Inputs, Outputs } from '../GraphProcessor.js';
+import {
+  type ChartNode,
+  type NodeConnection,
+  type NodeId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+  type PortId,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type Inputs, type Outputs } from '../GraphProcessor.js';
 import { coerceType } from '../../utils/coerceType.js';
-import { InternalProcessContext } from '../ProcessContext.js';
+import { type InternalProcessContext } from '../ProcessContext.js';
 import { dedent } from 'ts-dedent';
-import { EditorDefinition } from '../../index.js';
+import { type EditorDefinition } from '../../index.js';
+import { entries, values } from '../../utils/typeSafety.js';
 
 export type LoopControllerNode = ChartNode<'loopController', LoopControllerNodeData>;
 
 export type LoopControllerNodeData = {
   maxIterations?: number;
+  atMaxIterationsAction?: 'break' | 'error';
 };
 
 export class LoopControllerNodeImpl extends NodeImpl<LoopControllerNode> {
@@ -66,7 +76,7 @@ export class LoopControllerNodeImpl extends NodeImpl<LoopControllerNode> {
         (connection) => connection.inputId === inputDefault.id && connection.inputNodeId === this.id,
       );
       if (inputDefaultConnection && nodes[inputDefaultConnection.outputNodeId]) {
-        inputDefault.title = nodes[inputDefaultConnection.outputNodeId]!.title;
+        inputDefault.title = `${nodes[inputDefaultConnection.outputNodeId]!.title} (Default)`;
       }
 
       inputs.push(input);
@@ -85,6 +95,12 @@ export class LoopControllerNodeImpl extends NodeImpl<LoopControllerNode> {
       dataType: 'any',
       id: 'break' as PortId,
       title: 'Break',
+    });
+
+    outputs.push({
+      dataType: 'number',
+      id: 'iteration' as PortId,
+      title: 'Iteration',
     });
 
     for (let i = 1; i <= messageCount; i++) {
@@ -113,6 +129,23 @@ export class LoopControllerNodeImpl extends NodeImpl<LoopControllerNode> {
         type: 'number',
         label: 'Max Iterations',
         dataKey: 'maxIterations',
+      },
+      {
+        type: 'dropdown',
+        options: [
+          {
+            label: 'Break',
+            value: 'break',
+          },
+          {
+            label: 'Error',
+            value: 'error',
+          },
+        ],
+        label: 'At Max Iterations',
+        dataKey: 'atMaxIterationsAction',
+        defaultValue: 'error',
+        helperMessage: 'What should happen when the max iterations is reached?',
       },
     ];
   }
@@ -150,6 +183,32 @@ export class LoopControllerNodeImpl extends NodeImpl<LoopControllerNode> {
   async process(inputs: Inputs, context: InternalProcessContext): Promise<Outputs> {
     const output: Outputs = {};
 
+    let inputCount = 0;
+    while (inputs[`input${inputCount + 1}` as PortId] || inputs[`input${inputCount + 1}Default` as PortId]) {
+      inputCount++;
+    }
+
+    const defaultInputs = entries(inputs).filter(([key]) => key.endsWith('Default'));
+
+    // If any of the default inputs are control-flow-excluded, then exclude all outputs.
+    // Technically, it should be "any node outside of the cycle" but this should be good enough?
+    if (defaultInputs.some(([, value]) => value?.type === 'control-flow-excluded')) {
+      for (let i = 0; i <= inputCount; i++) {
+        output[`output${i}` as PortId] = { type: 'control-flow-excluded', value: undefined };
+      }
+      output['break' as PortId] = { type: 'control-flow-excluded', value: undefined };
+
+      return output;
+    }
+
+    const iterationCount = context.attachedData.loopInfo?.iterationCount ?? 0;
+
+    output['iteration' as PortId] = { type: 'number', value: iterationCount + 1 };
+
+    if (iterationCount >= (this.data.maxIterations ?? 100) && this.data.atMaxIterationsAction !== 'break') {
+      throw new Error(`Loop controller exceeded max iterations of ${this.data.maxIterations ?? 100}`);
+    }
+
     // If the continue port is not connected (so undefined), or if it's undefined before it's
     // inside the loop itself (connection has not ran yet), then we should continue by default.
     let continueValue = false;
@@ -165,7 +224,9 @@ export class LoopControllerNodeImpl extends NodeImpl<LoopControllerNode> {
       }
     }
 
-    const inputCount = Object.keys(inputs).filter((key) => key.startsWith('input') && !key.endsWith('Default')).length;
+    if (iterationCount >= (this.data.maxIterations ?? 100) && this.data.atMaxIterationsAction === 'break') {
+      continueValue = false;
+    }
 
     if (continueValue) {
       output['break' as PortId] = { type: 'control-flow-excluded', value: 'loop-not-broken' };

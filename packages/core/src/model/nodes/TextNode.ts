@@ -1,10 +1,18 @@
-import { ChartNode, NodeId, NodeInputDefinition, PortId, NodeOutputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { DataValue } from '../DataValue.js';
-import { match } from 'ts-pattern';
-import { EditorDefinition, NodeBodySpec, coerceTypeOptional } from '../../index.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type PortId,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type DataValue } from '../DataValue.js';
+import { type EditorDefinition, type NodeBodySpec } from '../../index.js';
 import { dedent } from 'ts-dedent';
+import { coerceTypeOptional } from '../../utils/coerceType.js';
+import { interpolate } from '../../utils/interpolation.js';
 
 export type TextNode = ChartNode<'text', TextNodeData>;
 
@@ -13,7 +21,7 @@ export type TextNodeData = {
 };
 
 export class TextNodeImpl extends NodeImpl<TextNode> {
-  static create(text: string = '{{input}}'): TextNode {
+  static create(): TextNode {
     const chartNode: TextNode = {
       type: 'text',
       title: 'Text',
@@ -24,7 +32,7 @@ export class TextNodeImpl extends NodeImpl<TextNode> {
         width: 300,
       },
       data: {
-        text,
+        text: '{{input}}',
       },
     };
 
@@ -81,22 +89,18 @@ export class TextNodeImpl extends NodeImpl<TextNode> {
     };
   }
 
-  interpolate(baseString: string, values: Record<string, any>): string {
-    return baseString.replace(/\{\{([^}]+)\}\}/g, (_m, p1) => {
-      const value = values[p1];
-      return value !== undefined ? value.toString() : '';
-    });
-  }
-
   async process(inputs: Record<string, DataValue>): Promise<Record<string, DataValue>> {
-    const inputMap = Object.keys(inputs).reduce((acc, key) => {
-      const stringValue = coerceTypeOptional(inputs[key], 'string') ?? '';
+    const inputMap = Object.keys(inputs).reduce(
+      (acc, key) => {
+        const stringValue = coerceTypeOptional(inputs[key], 'string') ?? '';
 
-      acc[key] = stringValue;
-      return acc;
-    }, {} as Record<string, string>);
+        acc[key] = stringValue;
+        return acc;
+      },
+      {} as Record<string, string>,
+    );
 
-    const outputValue = this.interpolate(this.chartNode.data.text, inputMap);
+    const outputValue = interpolate(this.chartNode.data.text, inputMap);
 
     return {
       output: {

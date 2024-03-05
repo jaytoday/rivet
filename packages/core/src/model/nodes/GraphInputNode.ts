@@ -1,11 +1,19 @@
-import { ChartNode, NodeId, NodeInputDefinition, PortId, NodeOutputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { DataType, DataValue, getDefaultValue, isArrayDataType } from '../DataValue.js';
-import { GraphInputs, Inputs, Outputs } from '../GraphProcessor.js';
-import { InternalProcessContext } from '../ProcessContext.js';
-import { EditorDefinition, NodeBodySpec, coerceTypeOptional, inferType } from '../../index.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type PortId,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type DataType, type DataValue, getDefaultValue, isArrayDataType } from '../DataValue.js';
+import { type Inputs } from '../GraphProcessor.js';
+import { type InternalProcessContext } from '../ProcessContext.js';
+import { type DynamicEditorEditor, type EditorDefinition, type NodeBodySpec } from '../../index.js';
 import { dedent } from 'ts-dedent';
+import { coerceTypeOptional, inferType } from '../../utils/coerceType.js';
 
 export type GraphInputNode = ChartNode<'graphInput', GraphInputNodeData>;
 
@@ -14,10 +22,11 @@ export type GraphInputNodeData = {
   dataType: DataType;
   defaultValue?: unknown;
   useDefaultValueInput?: boolean;
+  editor?: DynamicEditorEditor;
 };
 
 export class GraphInputNodeImpl extends NodeImpl<GraphInputNode> {
-  static create(id: string = 'input', dataType: DataType = 'string'): GraphInputNode {
+  static create(): GraphInputNode {
     const chartNode: GraphInputNode = {
       type: 'graphInput',
       title: 'Graph Input',
@@ -28,8 +37,8 @@ export class GraphInputNodeImpl extends NodeImpl<GraphInputNode> {
         width: 300,
       },
       data: {
-        id,
-        dataType,
+        id: 'input',
+        dataType: 'string',
         defaultValue: undefined,
         useDefaultValueInput: false,
       },
@@ -80,6 +89,24 @@ export class GraphInputNodeImpl extends NodeImpl<GraphInputNode> {
         dataKey: 'defaultValue',
         useInputToggleDataKey: 'useDefaultValueInput',
       },
+      {
+        type: 'dropdown',
+        label: 'Editor',
+        dataKey: 'editor',
+        defaultValue: 'auto',
+        options: [
+          { label: 'None', value: 'none' },
+          { label: 'Auto', value: 'auto' },
+          { label: 'String', value: 'string' },
+          { label: 'Number', value: 'number' },
+          { label: 'Code', value: 'code' },
+          { label: 'Data Type', value: 'dataTypeSelector' },
+          { label: 'String List', value: 'stringList' },
+          { label: 'Key Value Pairs', value: 'keyValuePair' },
+          { label: 'Toggle', value: 'toggle' },
+        ] satisfies { label: string; value: DynamicEditorEditor }[],
+        helperMessage: 'The editor to use when editing this value in the UI. Make sure this matches the data type.',
+      },
     ];
   }
 
@@ -87,6 +114,7 @@ export class GraphInputNodeImpl extends NodeImpl<GraphInputNode> {
     return dedent`
       ${this.data.id}
       Type: ${this.data.dataType}
+      ${this.data.defaultValue == null ? '' : `Default: ${this.data.defaultValue}`}
     `;
   }
 

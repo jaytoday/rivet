@@ -1,35 +1,56 @@
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
+import { useNodeHeightCache } from '../hooks/useNodeBodyHeight';
 import { DraggableNode } from './DraggableNode.js';
 import { css } from '@emotion/react';
 import { nodeStyles } from './nodeStyles.js';
-import { FC, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ContextMenu, ContextMenuContext } from './ContextMenu.js';
+import { type FC, useMemo, useRef, useState, type MouseEvent, useEffect } from 'react';
+import { ContextMenu, type ContextMenuContext } from './ContextMenu.js';
 import { CSSTransition } from 'react-transition-group';
 import { WireLayer } from './WireLayer.js';
 import { useContextMenu } from '../hooks/useContextMenu.js';
 import { useDraggingNode } from '../hooks/useDraggingNode.js';
 import { useDraggingWire } from '../hooks/useDraggingWire.js';
-import { ChartNode, CommentNode, GraphId, NodeConnection, NodeId, PortId } from '@ironclad/rivet-core';
+import {
+  type PortId,
+  type ChartNode,
+  type CommentNode,
+  type NodeConnection,
+  type NodeId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+} from '@ironclad/rivet-core';
 import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
 import {
-  CanvasPosition,
+  type CanvasPosition,
   canvasPositionState,
   editingNodeState,
   lastCanvasPositionByGraphState,
   lastMousePositionState,
   selectedNodesState,
+  searchMatchingNodeIdsState,
+  draggingWireClosestPortState,
+  hoveringNodeState,
+  pinnedNodesState,
 } from '../state/graphBuilder';
 import { useCanvasPositioning } from '../hooks/useCanvasPositioning.js';
 import { VisualNode } from './VisualNode.js';
 import { useStableCallback } from '../hooks/useStableCallback.js';
 import { useThrottleFn } from 'ahooks';
 import { produce } from 'immer';
-import { graphMetadataState, nodesByIdState } from '../state/graph.js';
+import { graphMetadataState } from '../state/graph.js';
 import { useViewportBounds } from '../hooks/useViewportBounds.js';
 import { useGlobalHotkey } from '../hooks/useGlobalHotkey.js';
 import { useWireDragScrolling } from '../hooks/useWireDragScrolling';
-import { useMergeRefs } from '@floating-ui/react';
+import { autoUpdate, offset, shift, useFloating, useMergeRefs } from '@floating-ui/react';
 import { useNodePortPositions } from '../hooks/useNodePortPositions';
+import { useCopyNodesHotkeys } from '../hooks/useCopyNodesHotkeys';
+import { useCanvasHotkeys } from '../hooks/useCanvasHotkeys';
+import { useSearchGraph } from '../hooks/useSearchGraph';
+import { zoomSensitivityState } from '../state/settings';
+import { MouseIcon } from './MouseIcon';
+import { PortInfo } from './PortInfo';
+import { useNodeTypes } from '../hooks/useNodeTypes';
+import { lastRunDataByNodeState, selectedProcessPageNodesState } from '../state/dataFlow';
 
 const styles = css`
   width: 100vw;
@@ -155,6 +176,12 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
   const { clientToCanvasPosition } = useCanvasPositioning();
   const setLastMousePosition = useSetRecoilState(lastMousePositionState);
 
+  const { refs, floatingStyles } = useFloating({
+    placement: 'bottom-end',
+    whileElementsMounted: autoUpdate,
+    middleware: [offset(5), shift({ crossAxis: true })],
+  });
+
   const lastMouseInfoRef = useRef<{ x: number; y: number; target: EventTarget | undefined }>({
     x: -3000,
     y: 0,
@@ -171,6 +198,8 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
   const { draggingWire, onWireStartDrag, onWireEndDrag } = useDraggingWire(onConnectionsChanged);
   useWireDragScrolling();
 
+  const cache = useNodeHeightCache();
+
   const {
     contextMenuRef,
     showContextMenu,
@@ -180,7 +209,11 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
     setContextMenuData,
   } = useContextMenu();
 
-  const { nodePortPositions, canvasRef } = useNodePortPositions();
+  const { nodePortPositions, canvasRef, recalculate: recalculatePortPositions } = useNodePortPositions();
+
+  useEffect(() => {
+    recalculatePortPositions();
+  }, [recalculatePortPositions, selectedGraphMetadata?.id]);
 
   const { setNodeRef } = useDroppable({ id: 'NodeCanvas' });
   const setCanvasRef = useMergeRefs([setNodeRef, canvasRef]);
@@ -228,6 +261,8 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
     (e: React.MouseEvent) => {
       setLastMousePosition({ x: e.clientX, y: e.clientY });
       lastMouseInfoRef.current = { x: e.clientX, y: e.clientY, target: e.target };
+
+      recalculatePortPositions();
 
       if (selectionBox) {
         const newBox = {
@@ -315,6 +350,8 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
     return false;
   };
 
+  const zoomSensitivity = useRecoilValue(zoomSensitivityState);
+
   // I think safari deals with wheel events differently, so we need to throttle the zooming
   // because otherwise it lags like CRAZY
   const zoomDebounced = useThrottleFn(
@@ -323,7 +360,7 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
         return;
       }
 
-      const zoomSpeed = 0.025;
+      const zoomSpeed = zoomSensitivity / 10; // 0.25 -> 0.025;
 
       const zoomFactor = wheelDelta < 0 ? 1 + zoomSpeed : 1 - zoomSpeed;
       const newZoom = canvasPosition.zoom * zoomFactor;
@@ -393,10 +430,71 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
     );
   });
 
-  const [hoveringNode, setHoveringNode] = useState<NodeId | undefined>();
+  const [hoveringNode, setHoveringNode] = useRecoilState(hoveringNodeState);
+  const [hoveringPort, setHoveringPort] = useState<
+    | {
+        nodeId: NodeId;
+        isInput: boolean;
+        portId: PortId;
+        definition: NodeInputDefinition | NodeOutputDefinition;
+      }
+    | undefined
+  >();
+  const hoveringPortTimeout = useRef<number | undefined>();
+  const [hoveringShowPortInfo, setHoveringPortShowInfo] = useState(false);
 
-  const onNodeMouseOver = useStableCallback((_e: any, nodeId: NodeId) => {
+  const closestPort = useRecoilValue(draggingWireClosestPortState);
+
+  const { setReference } = refs;
+
+  useEffect(() => {
+    if (closestPort?.portId) {
+      setHoveringPort({
+        portId: closestPort.portId,
+        nodeId: closestPort.nodeId,
+        isInput: true,
+        definition: closestPort.definition,
+      });
+      setReference(closestPort.element);
+
+      hoveringPortTimeout.current = window.setTimeout(() => {
+        setHoveringPortShowInfo(true);
+      }, 400);
+    } else {
+      setHoveringPort(undefined);
+      setHoveringPortShowInfo(false);
+      if (hoveringPortTimeout.current) {
+        window.clearTimeout(hoveringPortTimeout.current);
+      }
+    }
+  }, [closestPort?.portId, closestPort?.nodeId, closestPort?.definition, closestPort?.element, setReference]);
+
+  const onNodeMouseOver = useStableCallback((_e: MouseEvent<HTMLElement>, nodeId: NodeId) => {
     setHoveringNode(nodeId);
+  });
+
+  const onPortMouseOver = useStableCallback(
+    (
+      e: MouseEvent<HTMLElement>,
+      nodeId: NodeId,
+      isInput: boolean,
+      portId: PortId,
+      definition: NodeInputDefinition | NodeOutputDefinition,
+    ) => {
+      setHoveringPort({ nodeId, isInput, portId, definition });
+      refs.setReference((e.target as HTMLElement).closest('.port'));
+      hoveringPortTimeout.current = window.setTimeout(() => {
+        setHoveringPortShowInfo(true);
+      }, 700);
+    },
+  );
+
+  const onPortMouseOut = useStableCallback(() => {
+    setHoveringPort(undefined);
+    setHoveringPortShowInfo(false);
+    if (hoveringPortTimeout.current) {
+      window.clearTimeout(hoveringPortTimeout.current);
+    }
   });
 
   const onNodeMouseOut = useStableCallback(() => {
@@ -410,11 +508,11 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
       hNodes.add(editingNodeId);
     }
 
-    if (hoveringNode) {
+    if (hoveringNode && !hoveringPort) {
       hNodes.add(hoveringNode);
     }
     return [...hNodes];
-  }, [selectedNodeIds, hoveringNode, editingNodeId]);
+  }, [selectedNodeIds, hoveringNode, hoveringPort, editingNodeId]);
 
   const nodeSelected = useStableCallback((node: ChartNode, multi: boolean) => {
     onNodeSelected?.(node, multi);
@@ -467,6 +565,19 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
   // so we move it off screen instead
   const [contextMenuDisabled, setContextMenuDisabled] = useState(true);
 
+  useCanvasHotkeys();
+  useSearchGraph();
+
+  const searchMatchingNodes = useRecoilValue(searchMatchingNodeIdsState);
+
+  const pinnedNodes = useRecoilValue(pinnedNodesState);
+
+  const nodeTypes = useNodeTypes();
+  const lastRunPerNode = useRecoilValue(lastRunDataByNodeState);
+  const selectedProcessPagePerNode = useRecoilValue(selectedProcessPageNodesState);
+
+  const isZoomedOut = canvasPosition.zoom < 0.4;
+
   return (
     <DndContext onDragStart={onNodeStartDrag} onDragEnd={onNodeDragged}>
       <div
@@ -484,6 +595,8 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
           backgroundSize: `${20 * canvasPosition.zoom}px ${20 * canvasPosition.zoom}px`,
         }}
       >
+        <MouseIcon />
+        <CopyNodesHotkeys />
         <DebugOverlay enabled={false} />
         <div
           className="canvas-contents"
@@ -493,11 +606,14 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
         >
           <div className="nodes">
             {nodesWithConnections.map(({ node, nodeConnections }) => {
+              const isPinned = pinnedNodes.includes(node.id);
+
               if (
-                node.visualData.x < viewportBounds.left - (node.visualData.width ?? 300) ||
-                node.visualData.x > viewportBounds.right + (node.visualData.width ?? 300) ||
-                node.visualData.y < viewportBounds.top - 500 ||
-                node.visualData.y > viewportBounds.bottom + 500
+                (node.visualData.x < viewportBounds.left - (node.visualData.width ?? 300) ||
+                  node.visualData.x > viewportBounds.right + (node.visualData.width ?? 300) ||
+                  node.visualData.y < viewportBounds.top - 500 ||
+                  node.visualData.y > viewportBounds.bottom + 500) &&
+                !isPinned
               ) {
                 return null;
               }
@@ -508,10 +624,17 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
               return (
                 <DraggableNode
                   key={node.id}
+                  heightCache={cache}
                   node={node}
                   connections={nodeConnections}
-                  isSelected={highlightedNodes.includes(node.id)}
+                  isSelected={highlightedNodes.includes(node.id) || searchMatchingNodes.includes(node.id)}
                   canvasZoom={canvasPosition.zoom}
+                  isKnownNodeType={node.type in nodeTypes}
+                  lastRun={lastRunPerNode[node.id]}
+                  isPinned={pinnedNodes.includes(node.id)}
+                  isZoomedOut={isZoomedOut && node.type !== 'comment'}
+                  processPage={selectedProcessPagePerNode[node.id]!}
+                  draggingWire={draggingWire}
                   onWireStartDrag={onWireStartDrag}
                   onWireEndDrag={onWireEndDrag}
                   onNodeSelected={nodeSelected}
@@ -519,6 +642,8 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
                   onNodeSizeChanged={onNodeSizeChanged}
                   onMouseOver={onNodeMouseOver}
                   onMouseOut={onNodeMouseOut}
+                  onPortMouseOver={onPortMouseOver}
+                  onPortMouseOut={onPortMouseOut}
                 />
               );
             })}
@@ -542,7 +667,17 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
             ]}
           >
             {draggingNodes.map((node) => (
-              <VisualNode key={node.id} node={node} connections={draggingNodeConnections} isOverlay />
+              <VisualNode
+                key={node.id}
+                heightCache={cache}
+                node={node}
+                connections={draggingNodeConnections}
+                isOverlay
+                isKnownNodeType={node.type in nodeTypes}
+                isPinned={pinnedNodes.includes(node.id)}
+                isZoomedOut={isZoomedOut && node.type !== 'comment'}
+                processPage={selectedProcessPagePerNode[node.id]!}
+              />
             ))}
           </DragOverlay>
         </div>
@@ -584,8 +719,13 @@ export const NodeCanvas: FC<NodeCanvasProps> = ({
           connections={connections}
           draggingWire={draggingWire}
           highlightedNodes={highlightedNodes}
+          highlightedPort={hoveringPort}
           portPositions={nodePortPositions}
+          draggingNode={draggingNodes.length > 0}
         />
+        {hoveringPort && hoveringShowPortInfo && (
+          <PortInfo floatingStyles={floatingStyles} ref={refs.setFloating} port={hoveringPort} />
+        )}
       </div>
     </DndContext>
   );
@@ -616,4 +756,11 @@ const DebugOverlay: FC<{ enabled: boolean }> = ({ enabled }) => {
       </div>
     </div>
   );
+};
+
+// Optimization so that NodeCanvas doesn't rerender on mouse move
+export const CopyNodesHotkeys: FC = () => {
+  useCopyNodesHotkeys();
+
+  return null;
 };

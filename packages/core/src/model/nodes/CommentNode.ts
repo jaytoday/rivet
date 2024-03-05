@@ -1,9 +1,10 @@
-import { ChartNode, NodeId, NodeInputDefinition, NodeOutputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { DataValue } from '../DataValue.js';
+import { type ChartNode, type NodeId, type NodeInputDefinition, type NodeOutputDefinition } from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { type DataValue } from '../DataValue.js';
 import { dedent } from 'ts-dedent';
-import { EditorDefinition } from '../EditorDefinition.js';
+import { type EditorDefinition } from '../EditorDefinition.js';
+import { nodeDefinition } from '../NodeDefinition.js';
 
 export type CommentNode = ChartNode<'comment', CommentNodeData>;
 
@@ -15,7 +16,7 @@ export type CommentNodeData = {
 };
 
 export class CommentNodeImpl extends NodeImpl<CommentNode> {
-  static create(text: string = ''): CommentNode {
+  static create(): CommentNode {
     const chartNode: CommentNode = {
       type: 'comment',
       title: 'Comment',
@@ -26,7 +27,7 @@ export class CommentNodeImpl extends NodeImpl<CommentNode> {
         width: 600,
       },
       data: {
-        text,
+        text: '',
         height: 600,
         color: 'rgba(255,255,255,1)',
         backgroundColor: 'rgba(0,0,0,0.05)',

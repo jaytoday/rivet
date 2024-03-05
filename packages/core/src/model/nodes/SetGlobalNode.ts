@@ -1,20 +1,27 @@
-import { ChartNode, NodeId, NodeInputDefinition, PortId, NodeOutputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
 import {
-  DataType,
-  ScalarDataValue,
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type PortId,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import {
+  type DataType,
+  type ScalarDataValue,
   isArrayDataType,
   isScalarDataType,
   scalarDefaults,
   unwrapDataValue,
 } from '../DataValue.js';
-import { Inputs, Outputs } from '../GraphProcessor.js';
+import { type Inputs, type Outputs } from '../GraphProcessor.js';
 import { coerceType } from '../../utils/coerceType.js';
-import { InternalProcessContext } from '../ProcessContext.js';
+import { type InternalProcessContext } from '../ProcessContext.js';
 import { dedent } from 'ts-dedent';
-import { EditorDefinition } from '../EditorDefinition.js';
-import { NodeBodySpec } from '../NodeBodySpec.js';
+import { type EditorDefinition } from '../EditorDefinition.js';
+import { type NodeBodySpec } from '../NodeBodySpec.js';
 
 export type SetGlobalNode = ChartNode<'setGlobal', SetGlobalNodeData>;
 
@@ -76,6 +83,11 @@ export class SetGlobalNodeImpl extends NodeImpl<SetGlobalNode> {
         id: 'previous-value' as PortId,
         title: 'Previous Value',
         dataType: this.data.dataType,
+      },
+      {
+        id: 'variable_id_out' as PortId,
+        title: 'Variable ID',
+        dataType: 'string',
       },
     ];
   }
@@ -141,6 +153,7 @@ export class SetGlobalNodeImpl extends NodeImpl<SetGlobalNode> {
     return {
       ['saved-value' as PortId]: value,
       ['previous-value' as PortId]: previousValue,
+      ['variable_id_out' as PortId]: { type: 'string', value: id },
     };
   }
 }

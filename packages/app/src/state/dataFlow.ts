@@ -1,5 +1,5 @@
 import { atom, selectorFamily } from 'recoil';
-import { GraphId, Inputs, NodeId, Outputs, ProcessId } from '@ironclad/rivet-core';
+import { type GraphId, type Inputs, type NodeId, type Outputs, type ProcessId } from '@ironclad/rivet-core';
 
 export type ProcessDataForNode = {
   processId: ProcessId;
@@ -14,7 +14,12 @@ export type NodeRunData = {
   startedAt?: number;
   finishedAt?: number;
 
-  status?: { type: 'ok' } | { type: 'error'; error: string } | { type: 'running' } | { type: 'interrupted' };
+  status?:
+    | { type: 'ok' }
+    | { type: 'error'; error: string }
+    | { type: 'running' }
+    | { type: 'interrupted' }
+    | { type: 'notRan'; reason: string };
 
   inputData?: Inputs;
 
@@ -35,6 +40,11 @@ export const runningGraphsState = atom<GraphId[]>({
   default: [],
 });
 
+export const rootGraphState = atom<GraphId | undefined>({
+  key: 'rootGraph',
+  default: undefined,
+});
+
 export const lastRunData = selectorFamily<ProcessDataForNode[] | undefined, NodeId>({
   key: 'lastRunData',
   get:
@@ -47,6 +57,11 @@ export const lastRunData = selectorFamily<ProcessDataForNode[] | undefined, Node
 export const graphRunningState = atom<boolean>({
   key: 'graphRunning',
   default: false,
+});
+
+export const graphStartTimeState = atom<number | undefined>({
+  key: 'graphStartTime',
+  default: undefined,
 });
 
 export const graphPausedState = atom<boolean>({

@@ -1,24 +1,51 @@
-import { Opaque } from 'type-fest';
+import type { Opaque } from 'type-fest';
 import {
-  Settings,
-  NativeApi,
-  Project,
-  DataValue,
-  ExternalFunction,
-  Outputs,
-  GraphId,
-  GraphProcessor,
-  ScalarOrArrayDataValue,
+  type Settings,
+  type NativeApi,
+  type Project,
+  type DataValue,
+  type ExternalFunction,
+  type Outputs,
+  type GraphId,
+  type GraphProcessor,
+  type ScalarOrArrayDataValue,
+  type DatasetProvider,
+  type ChartNode,
+  type AttachedNodeData,
 } from '../index.js';
+import type { Tokenizer } from '../integrations/Tokenizer.js';
 
 export type ProcessContext = {
   settings: Settings;
-  nativeApi: NativeApi;
+  nativeApi?: NativeApi;
+
+  /** Sets the dataset provider to be used for all dataset node calls. */
+  datasetProvider?: DatasetProvider;
+
+  /** Sets the tokenizer that will be used for all nodes. If unset, the default GptTokenizerTokenizer will be used. */
+  tokenizer?: Tokenizer;
+
+  /**
+   * If implemented, chat nodes will first call this to resolve their configured endpoint to a final endpoint.
+   * You can use this for adding auth headers, or to load balance between multiple endpoints.
+   */
+  getChatNodeEndpoint?: (
+    configuredEndpoint: string,
+    configuredModel: string,
+  ) => ChatNodeEndpointInfo | Promise<ChatNodeEndpointInfo>;
+};
+
+export type ChatNodeEndpointInfo = {
+  endpoint: string;
+  headers: Record<string, string>;
 };
 
 export type ProcessId = Opaque<string, 'ProcessId'>;
 
-export type InternalProcessContext = ProcessContext & {
+export type InternalProcessContext<T extends ChartNode = ChartNode> = ProcessContext & {
+  /** The executor that is running the current processor. */
+  executor: 'nodejs' | 'browser';
+
   /** The project being executed. */
   project: Project;
 
@@ -37,6 +64,15 @@ export type InternalProcessContext = ProcessContext & {
   /** Outputs from the graph. A GraphOutputNode will set these. */
   graphOutputs: Record<string, DataValue>;
 
+  /** The tokenizer to use to tokenize all strings.s */
+  tokenizer: Tokenizer;
+
+  /** The current node being executed. */
+  node: T;
+
+  /** For internal and advanced cases, gets the arbitrary data attached to the node during graph execution. */
+  attachedData: AttachedNodeData;
+
   /** Raises a user event that can be listened for on the GraphProcessor. */
   raiseEvent: (eventName: string, data: DataValue | undefined) => void;
 
@@ -52,7 +88,7 @@ export type InternalProcessContext = ProcessContext & {
   onPartialOutputs?: (outputs: Outputs) => void;
 
   /** Creates a subprocessor, for executing subgraphs. */
-  createSubProcessor: (subGraphId: GraphId, options?: { signal?: AbortSignal }) => GraphProcessor;
+  createSubProcessor: (subGraphId: GraphId | undefined, options?: { signal?: AbortSignal }) => GraphProcessor;
 
   /** Like context, but variables that are set during the run of the graph and can be read during the graph. Shared among all graphs and subgraphs. */
   getGlobal: (id: string) => ScalarOrArrayDataValue | undefined;

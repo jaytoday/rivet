@@ -1,20 +1,27 @@
-import { NodeOfType, BuiltInNodeType, Outputs, globalRivetNodeRegistry } from '@ironclad/rivet-core';
-import { FC, useMemo } from 'react';
-import { ChartNode } from '@ironclad/rivet-core';
+import {
+  type NodeOfType,
+  type BuiltInNodeType,
+  type Outputs,
+  globalRivetNodeRegistry,
+  type ChartNode,
+} from '@ironclad/rivet-core';
+import { type FC, useMemo } from 'react';
 import { chatNodeDescriptor } from '../components/nodes/ChatNode.js';
 import { loopControllerNodeDescriptor } from '../components/nodes/LoopControllerNode.js';
-import { matchNodeDescriptor } from '../components/nodes/MatchNode.js';
 import { readDirectoryNodeDescriptor } from '../components/nodes/ReadDirectoryNode.js';
-import { readFileNodeDescriptor } from '../components/nodes/ReadFileNode.js';
 import { subgraphNodeDescriptor } from '../components/nodes/SubGraphNode.js';
 import { userInputNodeDescriptor } from '../components/nodes/UserInputNode.js';
 import { ObjectNodeDescriptor } from '../components/nodes/ObjectNode.js';
 import { commentNodeDescriptor } from '../components/nodes/CommentNode';
 import { imageNodeDescriptor } from '../components/nodes/ImageNode';
 import { audioNodeDescriptor } from '../components/nodes/AudioNode';
-import { useDependsOnPlugins } from './useDependsOnPlugins';
+import { appendToDatasetNodeDescriptor } from '../components/nodes/AppendToDatasetNode';
 import { useRecoilValue } from 'recoil';
 import { pluginRefreshCounterState } from '../state/plugins';
+import { loadDatasetNodeDescriptor } from '../components/nodes/LoadDatasetNode';
+import { datasetNearestNeighborsNodeDescriptor } from '../components/nodes/DatasetNearestNeighborsNode';
+import { getDatasetRowNodeDescriptor } from '../components/nodes/GetDatasetRowNode';
+import { replaceDatasetNodeDescriptor } from '../components/nodes/ReplaceDatasetNode';
 
 export type UnknownNodeComponentDescriptor = {
   Body?: FC<{ node: ChartNode }>;
@@ -43,21 +50,29 @@ export type NodeComponentDescriptors = {
 const overriddenDescriptors: Partial<NodeComponentDescriptors> = {
   chat: chatNodeDescriptor,
   loopController: loopControllerNodeDescriptor,
-  match: matchNodeDescriptor,
   readDirectory: readDirectoryNodeDescriptor,
-  readFile: readFileNodeDescriptor,
   subGraph: subgraphNodeDescriptor,
   userInput: userInputNodeDescriptor,
   object: ObjectNodeDescriptor,
   comment: commentNodeDescriptor,
   image: imageNodeDescriptor,
   audio: audioNodeDescriptor,
+  appendToDataset: appendToDatasetNodeDescriptor,
+  loadDataset: loadDatasetNodeDescriptor,
+  datasetNearestNeighbors: datasetNearestNeighborsNodeDescriptor,
+  getDatasetRow: getDatasetRowNodeDescriptor,
+  replaceDataset: replaceDatasetNodeDescriptor,
 };
 
 export function useNodeTypes(): NodeComponentDescriptors {
   const counter = useRecoilValue(pluginRefreshCounterState);
 
   return useMemo(() => {
+    if (Number.isNaN(counter)) {
+      // just for rules-of-hooks
+      throw new Error();
+    }
+
     const allNodeTypes = globalRivetNodeRegistry.getNodeTypes();
 
     return Object.fromEntries(

@@ -1,9 +1,12 @@
 import {
-  GraphOutputs,
-  NodeId,
-  ProcessEvents,
-  StringArrayDataValue,
+  type GraphOutputs,
+  type NodeId,
+  type ProcessEvents,
+  type StringArrayDataValue,
   globalRivetNodeRegistry,
+  serializeDatasets,
+  type GraphId,
+  type DataValue,
 } from '@ironclad/rivet-core';
 import { useCurrentExecution } from './useCurrentExecution';
 import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
@@ -11,7 +14,7 @@ import { graphState } from '../state/graph';
 import { settingsState } from '../state/settings';
 import { setCurrentDebuggerMessageHandler, useRemoteDebugger } from './useRemoteDebugger';
 import { fillMissingSettingsFromEnvironmentVariables } from '../utils/tauri';
-import { projectState } from '../state/savedGraphs';
+import { projectContextState, projectDataState, projectState } from '../state/savedGraphs';
 import { useStableCallback } from './useStableCallback';
 import { toast } from 'react-toastify';
 import { trivetState } from '../state/trivet';
@@ -19,6 +22,9 @@ import { runTrivet } from '@ironclad/trivet';
 import { produce } from 'immer';
 import { userInputModalQuestionsState, userInputModalSubmitState } from '../state/userInput';
 import { pluginsState } from '../state/plugins';
+import { entries } from '../../../core/src/utils/typeSafety';
+import { selectedExecutorState } from '../state/execution';
+import { datasetProvider } from '../utils/globals';
 
 // TODO: This allows us to retrieve the GraphOutputs from the remote debugger.
 // If the remote debugger events had a unique ID for each run, this would feel a lot less hacky.
@@ -34,13 +40,21 @@ export function useRemoteExecutor() {
   const graph = useRecoilValue(graphState);
   const savedSettings = useRecoilValue(settingsState);
   const project = useRecoilValue(projectState);
+  const projectData = useRecoilValue(projectDataState);
   const [{ testSuites }, setTrivetState] = useRecoilState(trivetState);
   const setUserInputModalSubmit = useSetRecoilState(userInputModalSubmitState);
   const setUserInputQuestions = useSetRecoilState(userInputModalQuestionsState);
+  const selectedExecutor = useRecoilValue(selectedExecutorState);
+  const projectContext = useRecoilValue(projectContextState(project.metadata.id));
 
   const remoteDebugger = useRemoteDebugger({
     onDisconnect: () => {
       currentExecution.onStop();
+
+      // If we're using the node executor, disconnecting means reconnecting to the internal executor
+      if (selectedExecutor === 'nodejs') {
+        remoteDebugger.connect('ws://localhost:21889/internal');
+      }
     },
   });
 
@@ -59,7 +73,7 @@ export function useRemoteExecutor() {
         currentExecution.onUserInput(data as ProcessEvents['userInput']);
         break;
       case 'start':
-        currentExecution.onStart();
+        currentExecution.onStart(data as ProcessEvents['start']);
         break;
       case 'done':
         const doneData = data as ProcessEvents['done'];
@@ -99,10 +113,13 @@ export function useRemoteExecutor() {
         graphExecutionPromise?.reject?.(errorData.error);
         currentExecution.onError(data as ProcessEvents['error']);
         break;
+      case 'nodeExcluded':
+        currentExecution.onNodeExcluded(data as ProcessEvents['nodeExcluded']);
+        break;
     }
   });
 
-  const tryRunGraph = async (options: { to?: NodeId[] } = {}) => {
+  const tryRunGraph = async (options: { to?: NodeId[]; graphId?: GraphId } = {}) => {
     if (
       !remoteDebugger.remoteDebuggerState.started ||
       remoteDebugger.remoteDebuggerState.socket?.readyState !== WebSocket.OPEN
@@ -123,6 +140,8 @@ export function useRemoteExecutor() {
       },
     });
 
+    const graphToRun = options.graphId ?? graph.metadata!.id!;
+
     try {
       if (remoteDebugger.remoteDebuggerState.remoteUploadAllowed) {
         remoteDebugger.send('set-dynamic-data', {
@@ -138,9 +157,21 @@ export function useRemoteExecutor() {
             globalRivetNodeRegistry.getPlugins(),
           ),
         });
+
+        for (const [id, dataValue] of entries(projectData)) {
+          remoteDebugger.sendRaw(`set-static-data:${id}:${dataValue}`);
+        }
       }
 
-      remoteDebugger.send('run', { graphId: graph.metadata!.id!, runToNodeIds: options.to });
+      const contextValues = entries(projectContext).reduce(
+        (acc, [id, value]) => ({
+          ...acc,
+          [id]: value.value,
+        }),
+        {} as Record<string, DataValue>,
+      );
+
+      remoteDebugger.send('run', { graphId: graphToRun, runToNodeIds: options.to, contextValues });
     } catch (e) {
       console.error(e);
     }
@@ -212,7 +243,15 @@ export function useRemoteExecutor() {
               };
             }
 
-            remoteDebugger.send('run', { graphId, inputs });
+            const contextValues = entries(projectContext).reduce(
+              (acc, [id, value]) => ({
+                ...acc,
+                [id]: value.value,
+              }),
+              {} as Record<string, DataValue>,
+            );
+
+            remoteDebugger.send('run', { graphId, inputs, contextValues });
 
             const results = await graphExecutionPromise.promise!;
             return results;

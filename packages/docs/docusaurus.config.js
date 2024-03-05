@@ -1,15 +1,14 @@
 // @ts-check
 // Note: type annotations allow type checking and IDEs autocompletion
 
-const lightCodeTheme = require('prism-react-renderer/themes/github');
-const darkCodeTheme = require('prism-react-renderer/themes/dracula');
+const lightCodeTheme = require('prism-react-renderer').themes.github;
+const darkCodeTheme = require('prism-react-renderer').themes.dracula;
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'Rivet',
   tagline: 'IDE and Library for Creating AI Agents',
   favicon: 'img/favicon.png',
-  noIndex: true, // Restrict search engine indexing. Remove once Rivet is publicly open-sourced.
 
   url: 'https://rivet.ironcladapp.com',
   baseUrl: '/',
@@ -26,6 +25,8 @@ const config = {
   },
 
   trailingSlash: false,
+
+  plugins: [require.resolve('docusaurus-plugin-image-zoom')],
 
   presets: [
     [
@@ -53,8 +54,7 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
-      // Replace with your project's social card
-      image: 'img/docusaurus-social-card.jpg',
+      image: 'img/social-card.png',
       colorMode: {
         defaultMode: 'dark',
       },
@@ -121,7 +121,7 @@ const config = {
             items: [
               {
                 label: 'Discord',
-                href: 'https://discord.gg/QE2tJKHX',
+                href: 'https://discord.gg/qT8B2gv9Mg',
               },
             ],
           },
@@ -130,7 +130,11 @@ const config = {
             items: [
               {
                 label: 'GitHub',
-                href: 'https://github.com/ironclad/rivet', // Replace with your project's GitHub URL
+                href: 'https://github.com/ironclad/rivet',
+              },
+              {
+                label: 'YouTube',
+                href: 'https://www.youtube.com/@rivet_ts',
               },
             ],
           },

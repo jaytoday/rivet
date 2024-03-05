@@ -1,20 +1,25 @@
-import { FC, useMemo, MouseEvent, useState } from 'react';
+import { type FC, useMemo, type MouseEvent, useState } from 'react';
 import Button from '@atlaskit/button';
 import clsx from 'clsx';
 import { css } from '@emotion/react';
-import { TrivetTestCase, TrivetTestCaseResult } from '@ironclad/trivet';
+import { type TrivetTestCase, type TrivetTestCaseResult } from '@ironclad/trivet';
 import { keyBy } from 'lodash-es';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { useContextMenu } from '../../hooks/useContextMenu';
 import { useStableCallback } from '../../hooks/useStableCallback';
 import Portal from '@atlaskit/portal';
 import { DropdownItem } from '@atlaskit/dropdown-menu';
-import { ReactComponent as MultiplyIcon } from 'majesticons/line/multiply-line.svg';
-import { ReactComponent as PlayIcon } from 'majesticons/line/play-circle-line.svg';
+import MultiplyIcon from 'majesticons/line/multiply-line.svg?react';
+import PlayIcon from 'majesticons/line/play-circle-line.svg?react';
 import Popup from '@atlaskit/popup';
 import TextField from '@atlaskit/textfield';
 
 const containerStyles = css`
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+
   h3 {
     margin-top: 32px;
     margin-bottom: 0;
@@ -28,6 +33,10 @@ const styles = css`
   grid-template-columns: 8px auto 36px 1fr 1fr;
   padding-top: 10px;
 
+  min-height: 0;
+  flex: 0 1 auto;
+  overflow: auto;
+
   .cell {
     padding: 8px;
     overflow: hidden;
@@ -37,6 +46,7 @@ const styles = css`
     display: flex;
     align-items: center;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    min-height: 32px;
   }
 
   .test-case-row {
@@ -142,6 +152,11 @@ const contextMenuStyles = css`
   box-shadow: 0 3px 5px rgba(0, 0, 0, 0.2);
   background: var(--grey-dark);
   min-width: max-content;
+
+  > button span {
+    // This fixes a bug in Ubuntu where the text is missing
+    overflow-x: visible !important;
+  }
 `;
 
 const runWithIterationPopupStyles = css`

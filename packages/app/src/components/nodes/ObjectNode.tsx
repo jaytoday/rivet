@@ -1,7 +1,7 @@
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 import styled from '@emotion/styled';
-import { ObjectNode } from '@ironclad/rivet-core';
-import { NodeComponentDescriptor } from '../../hooks/useNodeTypes';
+import { type ObjectNode } from '@ironclad/rivet-core';
+import { type NodeComponentDescriptor } from '../../hooks/useNodeTypes';
 import { LazyColorizedPreformattedText } from '../LazyComponents';
 
 export type ObjectNodeBodyProps = {
@@ -20,7 +20,13 @@ const Body = styled.div`
 
 export const ObjectNodeBody: FC<ObjectNodeBodyProps> = ({ node }) => {
   const truncated = useMemo(
-    () => node.data.jsonTemplate.split('\n').slice(0, 15).join('\n').trim(),
+    () =>
+      node.data.jsonTemplate
+        .split('\n')
+        .slice(0, 15)
+        .map((line) => (line.length > 1000 ? line.slice(0, 1000) + '...' : line))
+        .join('\n')
+        .trim(),
     [node.data.jsonTemplate],
   );
 

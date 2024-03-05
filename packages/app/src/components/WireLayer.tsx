@@ -1,14 +1,17 @@
-import { FC, useCallback, useEffect, useLayoutEffect, useState } from 'react';
-import { NodeConnection, NodeId, PortId } from '@ironclad/rivet-core';
+import { type FC, useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { type NodeConnection, type NodeId, type PortId } from '@ironclad/rivet-core';
 import { css } from '@emotion/react';
 import { ConditionallyRenderWire, PartialWire } from './Wire.js';
 import { useCanvasPositioning } from '../hooks/useCanvasPositioning.js';
 import { ErrorBoundary } from 'react-error-boundary';
-import { useRecoilValue, useSetRecoilState } from 'recoil';
+import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
 import { draggingWireClosestPortState } from '../state/graphBuilder.js';
 import { orderBy } from 'lodash-es';
-import { nodesByIdState } from '../state/graph';
-import { PortPositions } from './NodeCanvas';
+import { ioDefinitionsState, nodesByIdState } from '../state/graph';
+import { type PortPositions } from './NodeCanvas';
+import { type RunDataByNodeId, lastRunDataByNodeState, selectedProcessPageNodesState } from '../state/dataFlow';
+import select from '@atlaskit/select/dist/types/entry-points/select';
+import { useStableCallback } from '../hooks/useStableCallback';
 
 const wiresStyles = css`
   width: 100%;
@@ -21,8 +24,9 @@ const wiresStyles = css`
     stroke: gray;
   }
 
-  .selected {
-    stroke: blue;
+  .wire.isNotRan {
+    stroke: var(--grey-lightish);
+    stroke-dasharray: 5;
   }
 
   .wire.highlighted {
@@ -42,16 +46,43 @@ export type WireDef = {
 type WireLayerProps = {
   connections: NodeConnection[];
   draggingWire?: WireDef;
+  draggingNode: boolean;
   highlightedNodes?: NodeId[];
   portPositions: PortPositions;
+  highlightedPort?: {
+    nodeId: NodeId;
+    isInput: boolean;
+    portId: PortId;
+  };
 };
 
-export const WireLayer: FC<WireLayerProps> = ({ connections, draggingWire, highlightedNodes, portPositions }) => {
+export const WireLayer: FC<WireLayerProps> = ({
+  connections,
+  draggingWire,
+  draggingNode,
+  highlightedNodes,
+  portPositions,
+  highlightedPort,
+}) => {
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const setClosestPort = useSetRecoilState(draggingWireClosestPortState);
+  const [closestPort, setClosestPort] = useRecoilState(draggingWireClosestPortState);
+  const ioByNode = useRecoilValue(ioDefinitionsState);
+
+  // Is this too inefficient?
+  const lastRunDataByNode = useRecoilValue(lastRunDataByNodeState);
+  const selectedProcessPageNodes = useRecoilValue(selectedProcessPageNodesState);
+
+  const handleMouseDown = useStableCallback((event: MouseEvent) => {
+    const { clientX, clientY } = event;
+    setMousePosition({ x: clientX, y: clientY });
+  });
 
   const handleMouseMove = useCallback(
     (event: MouseEvent) => {
+      if (!draggingWire && !draggingNode) {
+        return;
+      }
+
       const { clientX, clientY } = event;
       setMousePosition({ x: clientX, y: clientY });
 
@@ -77,24 +108,29 @@ export const WireLayer: FC<WireLayerProps> = ({ connections, draggingWire, highl
           const nodeId = closestHoverElem!.parentElement!.dataset.nodeid as NodeId | undefined;
 
           if (portId && nodeId) {
-            setClosestPort({ nodeId, portId });
+            const io = ioByNode[nodeId!];
+            const definition = io!.inputDefinitions.find((def) => def.id === portId)!;
+
+            setClosestPort({ nodeId, portId, element: closestHoverElem.parentElement!, definition });
           } else {
             setClosestPort(undefined);
           }
         }
-      } else {
+      } else if (closestPort !== undefined) {
         setClosestPort(undefined);
       }
     },
-    [draggingWire, setClosestPort],
+    [draggingWire, setClosestPort, draggingNode, ioByNode, closestPort],
   );
 
   useEffect(() => {
+    window.addEventListener('mousedown', handleMouseDown, { capture: true });
     window.addEventListener('mousemove', handleMouseMove);
     return () => {
+      window.removeEventListener('mousedown', handleMouseDown, { capture: true });
       window.removeEventListener('mousemove', handleMouseMove);
     };
-  }, [handleMouseMove]);
+  }, [handleMouseMove, handleMouseDown]);
 
   useLayoutEffect(() => {}, [draggingWire, mousePosition.x, mousePosition.y, setClosestPort]);
 
@@ -120,6 +156,7 @@ export const WireLayer: FC<WireLayerProps> = ({ connections, draggingWire, highl
                 highlighted={!!(draggingWire.endNodeId && draggingWire.endPortId)}
                 nodesById={nodesById}
                 portPositions={portPositions}
+                isNotRan={false}
               />
             ) : (
               <PartialWire
@@ -135,8 +172,21 @@ export const WireLayer: FC<WireLayerProps> = ({ connections, draggingWire, highl
           </ErrorBoundary>
         )}
         {connections.map((connection) => {
-          const highlighted =
+          const isHighlightedNode =
             highlightedNodes?.includes(connection.inputNodeId) || highlightedNodes?.includes(connection.outputNodeId);
+
+          const isCurrentlyRunning = lastRunDataByNode[connection.inputNodeId]?.some(
+            (run) => run.data.status?.type === 'running',
+          );
+
+          const isHighlightedPort =
+            highlightedPort &&
+            (highlightedPort.isInput ? connection.inputId : connection.outputId) === highlightedPort.portId &&
+            (highlightedPort.isInput ? connection.inputNodeId : connection.outputNodeId) === highlightedPort.nodeId;
+
+          const isNotRan = getIsNotRan(connection, selectedProcessPageNodes, lastRunDataByNode);
+
+          const highlighted = isHighlightedNode || isCurrentlyRunning || isHighlightedPort;
           return (
             <ErrorBoundary fallback={<></>} key={`wire-${connection.inputId}-${connection.inputNodeId}`}>
               <ConditionallyRenderWire
@@ -145,6 +195,7 @@ export const WireLayer: FC<WireLayerProps> = ({ connections, draggingWire, highl
                 highlighted={!!highlighted}
                 nodesById={nodesById}
                 portPositions={portPositions}
+                isNotRan={isNotRan}
               />
             </ErrorBoundary>
           );
@@ -153,3 +204,41 @@ export const WireLayer: FC<WireLayerProps> = ({ connections, draggingWire, highl
     </svg>
   );
 };
+
+// Not sure if too much computation to run on render... it's all indexed lookups, but there are a lot
+function getIsNotRan(
+  connection: NodeConnection,
+  selectedProcessPageNodes: Record<NodeId, number | 'latest'>,
+  lastRunDataByNode: RunDataByNodeId,
+) {
+  // Too heavyweight for here?
+  const inputNodeSelectedProcessPage = selectedProcessPageNodes[connection.inputNodeId];
+  const outputNodeSelectedProcessPage = selectedProcessPageNodes[connection.outputNodeId];
+  const inputNodeLastRunData = lastRunDataByNode[connection.inputNodeId];
+  const outputNodeLastRunData = lastRunDataByNode[connection.outputNodeId];
+  let isNotRan = false;
+  if (
+    inputNodeLastRunData &&
+    outputNodeLastRunData &&
+    inputNodeSelectedProcessPage != null &&
+    outputNodeSelectedProcessPage != null &&
+    inputNodeSelectedProcessPage === outputNodeSelectedProcessPage // Needs same process selected for this to mean anything
+  ) {
+    const inputNodeSelectedExecution =
+      inputNodeSelectedProcessPage === 'latest'
+        ? inputNodeLastRunData[inputNodeLastRunData.length - 1]
+        : inputNodeLastRunData[inputNodeSelectedProcessPage];
+    const outputNodeSelectedExecution =
+      outputNodeSelectedProcessPage === 'latest'
+        ? outputNodeLastRunData[outputNodeLastRunData.length - 1]
+        : outputNodeLastRunData[outputNodeSelectedProcessPage];
+
+    if (inputNodeSelectedExecution?.data.inputData && outputNodeSelectedExecution?.data.outputData) {
+      const inputValue = inputNodeSelectedExecution.data.inputData[connection.inputId];
+      const outputValue = outputNodeSelectedExecution.data.outputData[connection.outputId];
+      isNotRan = outputValue?.type === 'control-flow-excluded' && inputValue?.type === 'control-flow-excluded';
+    }
+  }
+
+  return isNotRan;
+}

@@ -1,21 +1,19 @@
 import { css } from '@emotion/react';
-import { FC, useEffect } from 'react';
+import { type FC } from 'react';
 import { useRecoilState, useRecoilValue } from 'recoil';
-import { graphState } from '../state/graph.js';
-import { loadedProjectState, projectPluginsState, projectState, savedGraphsState } from '../state/savedGraphs.js';
-import { ReactComponent as ExpandLeftIcon } from 'majesticons/line/menu-expand-left-line.svg';
-import { ReactComponent as ExpandRightIcon } from 'majesticons/line/menu-expand-right-line.svg';
-import { InlineEditableTextfield } from '@atlaskit/inline-edit';
-import { NodeGraph } from '@ironclad/rivet-core';
+import { projectState } from '../state/savedGraphs.js';
+import ExpandLeftIcon from 'majesticons/line/menu-expand-left-line.svg?react';
+import ExpandRightIcon from 'majesticons/line/menu-expand-right-line.svg?react';
+import { type GraphId } from '@ironclad/rivet-core';
 import { sidebarOpenState } from '../state/graphBuilder.js';
-import { appWindow } from '@tauri-apps/api/window';
 import Tabs, { Tab, TabList, TabPanel } from '@atlaskit/tabs';
 import { GraphList } from './GraphList.js';
-import { ProjectPluginsConfiguration } from './ProjectPluginConfiguration';
+import { ProjectInfoSidebarTab } from './ProjectInfoSidebarTab';
+import { GraphInfoSidebarTab } from './GraphInfoSidebarTab';
 
 const styles = css`
   position: fixed;
-  top: 0;
+  top: var(--project-selector-height);
   left: 0;
   bottom: 0;
   width: 250px; // Adjust the width of the sidebar as needed
@@ -44,10 +42,11 @@ const styles = css`
 
   .toggle-tab {
     position: absolute;
-    top: 10px;
+    top: 0;
     right: -32px;
     background-color: var(--grey-dark);
     border: 1px solid var(--grey);
+    border-top: 0;
     border-left: 0;
     border-radius: 0 8px 8px 0;
     width: 32px;
@@ -70,28 +69,11 @@ const styles = css`
   }
 `;
 
-export const LeftSidebar: FC = () => {
-  const [graph, setGraph] = useRecoilState(graphState);
-  const [project, setProject] = useRecoilState(projectState);
-  const [savedGraphs, setSavedGraphs] = useRecoilState(savedGraphsState);
+export const LeftSidebar: FC<{
+  onRunGraph?: (graphId: GraphId) => void;
+}> = ({ onRunGraph }) => {
+  const project = useRecoilValue(projectState);
   const [sidebarOpen, setSidebarOpen] = useRecoilState(sidebarOpenState);
-
-  const loadedProject = useRecoilValue(loadedProjectState);
-
-  function setGraphAndSavedGraph(graph: NodeGraph) {
-    setGraph(graph);
-    setSavedGraphs(savedGraphs.map((g) => (g.metadata!.id === graph.metadata!.id ? graph : g)));
-  }
-
-  useEffect(() => {
-    (async () => {
-      try {
-        await appWindow.setTitle(`Rivet - ${project.metadata.title} (${loadedProject.path})`);
-      } catch (err) {
-        console.warn(`Failed to set window title, likely not running in Tauri: ${err}`);
-      }
-    })();
-  }, [loadedProject, project.metadata.title]);
 
   return (
     <div
@@ -111,62 +93,17 @@ export const LeftSidebar: FC = () => {
           </TabList>
           <TabPanel>
             <div className="panel" data-contextmenutype="graph-list">
-              <GraphList />
+              <GraphList onRunGraph={onRunGraph} />
             </div>
           </TabPanel>
           <TabPanel>
             <div className="panel">
-              <div className="graph-info-section">
-                <InlineEditableTextfield
-                  key={`graph-name-${graph.metadata?.id}`}
-                  label="Graph Name"
-                  placeholder="Graph Name"
-                  onConfirm={(newValue) =>
-                    setGraphAndSavedGraph({ ...graph, metadata: { ...graph.metadata, name: newValue } })
-                  }
-                  defaultValue={graph.metadata?.name ?? 'Untitled Graph'}
-                  readViewFitContainerWidth
-                />
-                <InlineEditableTextfield
-                  key={`graph-description-${graph.metadata?.id}`}
-                  label="Description"
-                  placeholder="Graph Description"
-                  defaultValue={graph.metadata?.description ?? ''}
-                  onConfirm={(newValue) =>
-                    setGraphAndSavedGraph({ ...graph, metadata: { ...graph.metadata, description: newValue } })
-                  }
-                  readViewFitContainerWidth
-                />
-              </div>
+              <GraphInfoSidebarTab />
             </div>
           </TabPanel>
           <TabPanel>
             <div className="panel">
-              <div className="project-info-section">
-                <InlineEditableTextfield
-                  key={`name-${project.metadata.id}`}
-                  label="Project Name"
-                  placeholder="Project Name"
-                  readViewFitContainerWidth
-                  defaultValue={project.metadata.title}
-                  onConfirm={(newValue) =>
-                    setProject({ ...project, metadata: { ...project.metadata, title: newValue } })
-                  }
-                />
-
-                <InlineEditableTextfield
-                  key={`description-${project.metadata.id}`}
-                  label="Description"
-                  placeholder="Project Description"
-                  defaultValue={project.metadata?.description ?? ''}
-                  onConfirm={(newValue) =>
-                    setProject({ ...project, metadata: { ...project.metadata, description: newValue } })
-                  }
-                  readViewFitContainerWidth
-                />
-
-                <ProjectPluginsConfiguration />
-              </div>
+              <ProjectInfoSidebarTab />
             </div>
           </TabPanel>
         </Tabs>

@@ -1,13 +1,18 @@
-import { ChartNode, NodeId } from '../../model/NodeBase.js';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../../model/NodeImpl.js';
-import { NodeInputDefinition, NodeOutputDefinition, PortId } from '../../model/NodeBase.js';
-import { DataValue } from '../../model/DataValue.js';
-import { SupportedModels, chunkStringByTokenCount } from '../../utils/tokenizer.js';
-import { nanoid } from 'nanoid';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+  type PortId,
+} from '../../model/NodeBase.js';
+import { NodeImpl, type NodeUIData } from '../../model/NodeImpl.js';
+import { nanoid } from 'nanoid/non-secure';
 import { coerceType } from '../../utils/coerceType.js';
 import { dedent } from 'ts-dedent';
 import { openAiModelOptions, openaiModels } from '../../utils/openai.js';
-import { EditorDefinition } from '../../index.js';
+import { type EditorDefinition, type Inputs, type InternalProcessContext, type Outputs } from '../../index.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import type { Tokenizer, TokenizerCallInfo } from '../../integrations/Tokenizer.js';
 
 export type ChunkNodeData = {
   numTokensPerChunk: number;
@@ -133,15 +138,20 @@ export class ChunkNodeImpl extends NodeImpl<ChunkNode> {
     };
   }
 
-  async process(inputs: Record<PortId, DataValue>): Promise<Record<PortId, DataValue>> {
+  async process(inputs: Inputs, context: InternalProcessContext): Promise<Outputs> {
     const input = coerceType(inputs['input' as PortId], 'string');
 
     const overlapPercent = this.chartNode.data.overlap / 100;
 
     const chunked = chunkStringByTokenCount(
+      context.tokenizer,
+      {
+        node: this.chartNode,
+        endpoint: undefined,
+        model: this.data.model,
+      },
       input,
       this.chartNode.data.numTokensPerChunk,
-      openaiModels[this.chartNode.data.model as SupportedModels].tiktokenModel,
       overlapPercent,
     );
 
@@ -171,3 +181,24 @@ export class ChunkNodeImpl extends NodeImpl<ChunkNode> {
 }
 
 export const chunkNode = nodeDefinition(ChunkNodeImpl, 'Chunk');
+
+export function chunkStringByTokenCount(
+  tokenizer: Tokenizer,
+  tokenizerInfo: TokenizerCallInfo,
+  input: string,
+  targetTokenCount: number,
+  overlapPercent: number,
+) {
+  overlapPercent = Number.isNaN(overlapPercent) ? 0 : Math.max(0, Math.min(1, overlapPercent));
+
+  const chunks: string[] = [];
+  const guess = Math.floor(targetTokenCount * (input.length / tokenizer.getTokenCountForString(input, tokenizerInfo)));
+  let remaining = input;
+
+  while (remaining.length > 0) {
+    chunks.push(remaining.slice(0, guess));
+    remaining = remaining.slice(guess - Math.floor(guess * overlapPercent));
+  }
+
+  return chunks;
+}

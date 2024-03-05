@@ -1,8 +1,15 @@
-import { ChartNode, NodeId, NodeInputDefinition, PortId, NodeOutputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { DataValue } from '../DataValue.js';
-import { expectType } from '../../index.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type PortId,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type DataValue } from '../DataValue.js';
+import { expectType } from '../../utils/index.js';
 import { dedent } from 'ts-dedent';
 
 export type ExtractJsonNode = ChartNode<'extractJson', ExtractJsonNodeData>;
@@ -33,6 +40,7 @@ export class ExtractJsonNodeImpl extends NodeImpl<ExtractJsonNode> {
         title: 'Input',
         dataType: 'string',
         required: true,
+        coerced: false,
       },
     ];
   }
@@ -68,13 +76,42 @@ export class ExtractJsonNodeImpl extends NodeImpl<ExtractJsonNode> {
   async process(inputs: Record<PortId, DataValue>): Promise<Record<PortId, DataValue>> {
     const inputString = expectType(inputs['input' as PortId], 'string');
 
-    const firstBracket = inputString.indexOf('{');
-    const lastBracket = inputString.lastIndexOf('}');
-    const firstSquareBracket = inputString.indexOf('[');
-    const lastSquareBracket = inputString.lastIndexOf(']');
+    try {
+      const parsed = JSON.parse(inputString);
+      return {
+        ['output' as PortId]: {
+          type: 'object',
+          value: parsed,
+        },
+        ['noMatch' as PortId]: {
+          type: 'control-flow-excluded',
+          value: undefined,
+        },
+      };
+    } catch (_err: unknown) {
+      // Fall back to more manual parsing
+    }
 
-    const firstIndex = Math.min(firstBracket, firstSquareBracket);
-    const lastIndex = Math.max(lastBracket, lastSquareBracket);
+    // Find the first { or [ and the last } or ], and try parsing everything in between including them.
+
+    let firstBracket = inputString.indexOf('{');
+    let lastBracket = inputString.lastIndexOf('}');
+    let firstSquareBracket = inputString.indexOf('[');
+    let lastSquareBracket = inputString.lastIndexOf(']');
+
+    const firstIndex =
+      firstBracket >= 0 && firstSquareBracket >= 0
+        ? Math.min(firstBracket, firstSquareBracket)
+        : firstBracket >= 0
+          ? firstBracket
+          : firstSquareBracket;
+
+    const lastIndex =
+      lastBracket >= 0 && lastSquareBracket >= 0
+        ? Math.max(lastBracket, lastSquareBracket)
+        : lastBracket >= 0
+          ? lastBracket
+          : lastSquareBracket;
 
     const substring = inputString.substring(firstIndex, lastIndex + 1);
 

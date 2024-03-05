@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import { NodeConnection, NodeId, PortId } from '@ironclad/rivet-core';
+import { type NodeConnection, type NodeId, type PortId } from '@ironclad/rivet-core';
 import { useRecoilState, useRecoilValue } from 'recoil';
 import { connectionsState, ioDefinitionsState, nodesByIdState } from '../state/graph.js';
 import { draggingWireClosestPortState, draggingWireState } from '../state/graphBuilder.js';
@@ -10,7 +10,7 @@ export const useDraggingWire = (onConnectionsChanged: (connections: NodeConnecti
   const ioByNode = useRecoilValue(ioDefinitionsState);
   const connections = useRecoilValue(connectionsState);
   const nodesById = useRecoilValue(nodesByIdState);
-  const closestPortToDraggingWire = useRecoilValue(draggingWireClosestPortState);
+  const [closestPortToDraggingWire, setClosestPortToDraggingWire] = useRecoilState(draggingWireClosestPortState);
   const isDragging = !!draggingWire;
 
   const latestClosestPort = useLatest(closestPortToDraggingWire);
@@ -42,19 +42,25 @@ export const useDraggingWire = (onConnectionsChanged: (connections: NodeConnecti
           newConnections.splice(existingConnectionIndex, 1);
           onConnectionsChanged(newConnections);
 
-          setDraggingWire({
-            startNodeId: connections[existingConnectionIndex]!.outputNodeId,
-            startPortId: connections[existingConnectionIndex]!.outputId,
+          const { outputId, outputNodeId } = connections[existingConnectionIndex]!;
 
+          const def = ioByNode[outputNodeId]!.outputDefinitions.find((o) => o.id === outputId)!;
+
+          setDraggingWire({
+            startNodeId: outputNodeId,
+            startPortId: outputId,
             startPortIsInput: false,
+            dataType: def.dataType,
           });
           return;
         }
         return;
       }
-      setDraggingWire({ startNodeId, startPortId, startPortIsInput: isInput });
+
+      const def = ioByNode[startNodeId]!.outputDefinitions.find((o) => o.id === startPortId)!;
+      setDraggingWire({ startNodeId, startPortId, startPortIsInput: isInput, dataType: def.dataType });
     },
-    [connections, onConnectionsChanged, setDraggingWire],
+    [connections, ioByNode, onConnectionsChanged, setDraggingWire],
   );
 
   const onWireEndDrag = useCallback(
@@ -63,7 +69,7 @@ export const useDraggingWire = (onConnectionsChanged: (connections: NodeConnecti
         return;
       }
 
-      const { nodeId: endNodeId, portId: endPortId } = closestPortToDraggingWire!;
+      const { nodeId: endNodeId, portId: endPortId } = closestPortToDraggingWire ?? {};
 
       if (!endNodeId || !endPortId) {
         return;
@@ -93,6 +99,7 @@ export const useDraggingWire = (onConnectionsChanged: (connections: NodeConnecti
 
         if (!inputNode || !outputNode || !input || !output) {
           setDraggingWire(undefined);
+          setClosestPortToDraggingWire(undefined);
           return;
         }
       }
@@ -120,8 +127,18 @@ export const useDraggingWire = (onConnectionsChanged: (connections: NodeConnecti
       onConnectionsChanged?.([...newConnections, connection]);
 
       setDraggingWire(undefined);
+      setClosestPortToDraggingWire(undefined);
     },
-    [draggingWire, connections, nodesById, onConnectionsChanged, ioByNode, setDraggingWire],
+    [
+      draggingWire,
+      connections,
+      nodesById,
+      onConnectionsChanged,
+      ioByNode,
+      setDraggingWire,
+      closestPortToDraggingWire,
+      setClosestPortToDraggingWire,
+    ],
   );
 
   useEffect(() => {
@@ -138,7 +155,7 @@ export const useDraggingWire = (onConnectionsChanged: (connections: NodeConnecti
     return () => {
       window.removeEventListener('mouseup', handleWindowClick);
     };
-  }, [draggingWire, setDraggingWire]);
+  }, [draggingWire, setDraggingWire, latestClosestPort]);
 
   return {
     draggingWire,

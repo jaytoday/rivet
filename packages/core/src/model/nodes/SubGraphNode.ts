@@ -1,15 +1,26 @@
-import { ChartNode, NodeConnection, NodeId, NodeInputDefinition, NodeOutputDefinition, PortId } from '../NodeBase.js';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { Inputs, Outputs } from '../GraphProcessor.js';
-import { GraphId } from '../NodeGraph.js';
-import { nanoid } from 'nanoid';
-import { Project } from '../Project.js';
-import { GraphInputNode } from './GraphInputNode.js';
-import { GraphOutputNode } from './GraphOutputNode.js';
-import { ControlFlowExcludedDataValue, DataValue } from '../DataValue.js';
-import { InternalProcessContext } from '../ProcessContext.js';
-import { EditorDefinition, getError } from '../../index.js';
+import {
+  type ChartNode,
+  type NodeConnection,
+  type NodeId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+  type PortId,
+} from '../NodeBase.js';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type Inputs, type Outputs } from '../GraphProcessor.js';
+import { type GraphId } from '../NodeGraph.js';
+import { nanoid } from 'nanoid/non-secure';
+import { type Project } from '../Project.js';
+import { type GraphInputNode } from './GraphInputNode.js';
+import { type GraphOutputNode } from './GraphOutputNode.js';
+import { type DataValue } from '../DataValue.js';
+import { type InternalProcessContext } from '../ProcessContext.js';
+import { type DynamicEditorEditor, type EditorDefinition } from '../../index.js';
 import { dedent } from 'ts-dedent';
+import { getError } from '../../utils/errors.js';
+import { match } from 'ts-pattern';
+import type { RivetUIContext } from '../RivetUIContext.js';
 
 export type SubGraphNode = ChartNode & {
   type: 'subGraph';
@@ -17,6 +28,9 @@ export type SubGraphNode = ChartNode & {
     graphId: GraphId;
     useErrorOutput?: boolean;
     useAsGraphPartialOutput?: boolean;
+
+    /** Data for each of the inputs of the subgraph */
+    inputData?: Record<string, DataValue>;
   };
 };
 
@@ -103,8 +117,8 @@ export class SubGraphNodeImpl extends NodeImpl<SubGraphNode> {
     return outputs;
   }
 
-  getEditors(): EditorDefinition<SubGraphNode>[] {
-    return [
+  getEditors(context: RivetUIContext): EditorDefinition<SubGraphNode>[] {
+    const definitions: EditorDefinition<SubGraphNode>[] = [
       {
         type: 'graphSelector',
         label: 'Graph',
@@ -116,6 +130,28 @@ export class SubGraphNodeImpl extends NodeImpl<SubGraphNode> {
         dataKey: 'useErrorOutput',
       },
     ];
+
+    if (this.data.graphId) {
+      const graph = context.project.graphs[this.data.graphId];
+      if (graph) {
+        const inputNodes = graph.nodes.filter((node) => node.type === 'graphInput') as GraphInputNode[];
+        const inputIds = [...new Set(inputNodes.map((node) => node.data.id))].sort();
+
+        for (const inputId of inputIds) {
+          const inputNode = inputNodes.find((node) => node.data.id === inputId)!;
+          definitions.push({
+            type: 'dynamic',
+            dataKey: 'inputData',
+            dynamicDataKey: inputNode.data.id,
+            dataType: inputNode.data.dataType,
+            label: inputNode.data.id,
+            editor: inputNode.data.editor ?? 'auto',
+          });
+        }
+      }
+    }
+
+    return definitions;
   }
 
   static getUIData(): NodeUIData {
@@ -136,6 +172,32 @@ export class SubGraphNodeImpl extends NodeImpl<SubGraphNode> {
       throw new Error('SubGraphNode requires a project to be set in the context.');
     }
 
+    const graph = project.graphs[this.data.graphId];
+    if (!graph) {
+      throw new Error(`SubGraphNode requires a graph with id ${this.data.graphId} to be present in the project.`);
+    }
+
+    const inputNodes = graph.nodes.filter((node) => node.type === 'graphInput') as GraphInputNode[];
+    const inputIds = [...new Set(inputNodes.map((node) => node.data.id))].sort();
+
+    const inputData = inputIds.reduce((obj, id): Inputs => {
+      if (inputs[id as PortId] != null) {
+        return {
+          ...obj,
+          [id]: inputs[id as PortId],
+        };
+      }
+
+      if (this.data.inputData?.[id] != null) {
+        return {
+          ...obj,
+          [id]: this.data.inputData[id],
+        };
+      }
+
+      return obj;
+    }, {} as Inputs);
+
     const subGraphProcessor = context.createSubProcessor(this.data.graphId, { signal: context.signal });
 
     try {
@@ -143,7 +205,7 @@ export class SubGraphNodeImpl extends NodeImpl<SubGraphNode> {
 
       const outputs = await subGraphProcessor.processGraph(
         context,
-        inputs as Record<string, DataValue>,
+        inputData as Record<string, DataValue>,
         context.contextValues,
       );
 

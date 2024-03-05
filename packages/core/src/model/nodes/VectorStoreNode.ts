@@ -1,10 +1,19 @@
-import { ChartNode, NodeId, NodeInputDefinition, PortId, NodeOutputDefinition } from '../NodeBase.js';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { nanoid } from 'nanoid';
-import { Inputs, Outputs } from '../GraphProcessor.js';
-import { InternalProcessContext } from '../ProcessContext.js';
-import { EditorDefinition, VectorDataValue, coerceTypeOptional, getIntegration } from '../../index.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type PortId,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { nanoid } from 'nanoid/non-secure';
+import { type Inputs, type Outputs } from '../GraphProcessor.js';
+import { type InternalProcessContext } from '../ProcessContext.js';
+import { type EditorDefinition, type VectorDataValue } from '../../index.js';
 import { dedent } from 'ts-dedent';
+import { coerceTypeOptional } from '../../utils/coerceType.js';
+import { getIntegration } from '../../integrations/integrations.js';
 
 export type VectorStoreNode = ChartNode<'vectorStore', VectorStoreNodeData>;
 
@@ -93,10 +102,7 @@ export class VectorStoreNodeImpl extends NodeImpl<VectorStoreNode> {
         type: 'dropdown',
         label: 'Integration',
         dataKey: 'integration',
-        options: [
-          { label: 'Pinecone', value: 'pinecone' },
-          { label: 'Milvus', value: 'milvus' },
-        ],
+        options: [{ label: 'Pinecone', value: 'pinecone' }],
         useInputToggleDataKey: 'useIntegrationInput',
       },
       {
@@ -110,8 +116,8 @@ export class VectorStoreNodeImpl extends NodeImpl<VectorStoreNode> {
 
   getBody(): string | undefined {
     return dedent`
-      ${this.data.useIntegrationInput ? '(Integration using input)' : this.data.integration}
-      ${this.data.useCollectionIdInput ? '(using input)' : this.data.collectionId}
+      Integration: ${this.data.useIntegrationInput ? '(using input)' : this.data.integration}
+      Collection Id: ${this.data.useCollectionIdInput ? '(using input)' : this.data.collectionId}
     `;
   }
 

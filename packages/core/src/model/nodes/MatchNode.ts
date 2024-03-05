@@ -1,19 +1,30 @@
-import { ChartNode, NodeId, NodeInputDefinition, PortId, NodeOutputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { DataValue } from '../DataValue.js';
-import { coerceType } from '../../index.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type PortId,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type DataValue } from '../DataValue.js';
+import { type EditorDefinition, type Inputs, type NodeBody, type Outputs } from '../../index.js';
 import { dedent } from 'ts-dedent';
+import { coerceType } from '../../utils/coerceType.js';
+import type { RivetUIContext } from '../RivetUIContext.js';
 
 export type MatchNode = ChartNode<'match', MatchNodeData>;
 
 export type MatchNodeData = {
-  caseCount: number;
   cases: string[];
+
+  /** If true, only the first matching branch will be ran. */
+  exclusive?: boolean;
 };
 
 export class MatchNodeImpl extends NodeImpl<MatchNode> {
-  static create(caseCount: number = 2, cases: string[] = ['YES', 'NO']): MatchNode {
+  static create(): MatchNode {
     const chartNode: MatchNode = {
       type: 'match',
       title: 'Match',
@@ -24,8 +35,7 @@ export class MatchNodeImpl extends NodeImpl<MatchNode> {
         width: 250,
       },
       data: {
-        caseCount,
-        cases,
+        cases: ['YES', 'NO'],
       },
     };
 
@@ -36,9 +46,17 @@ export class MatchNodeImpl extends NodeImpl<MatchNode> {
     const inputs: NodeInputDefinition[] = [
       {
         id: 'input' as PortId,
-        title: 'Input',
+        title: 'Test',
         dataType: 'string',
         required: true,
+        description: 'The value that will be tested against each of the cases.',
+      },
+      {
+        id: 'value' as PortId,
+        title: 'Value',
+        dataType: 'any',
+        description:
+          'The value passed through to the output port that matches. If unconnected, the test value will be passed through.',
       },
     ];
 
@@ -48,11 +66,13 @@ export class MatchNodeImpl extends NodeImpl<MatchNode> {
   getOutputDefinitions(): NodeOutputDefinition[] {
     const outputs: NodeOutputDefinition[] = [];
 
-    for (let i = 0; i < this.chartNode.data.caseCount; i++) {
+    for (let i = 0; i < this.data.cases.length; i++) {
       outputs.push({
         id: `case${i + 1}` as PortId,
-        title: `Case ${i + 1}`,
+        title: this.data.cases[i]?.trim() ? this.data.cases[i]! : `Case ${i + 1}`,
         dataType: 'string',
+        description: `The 'value' (or 'test' if value is unconnected) passed through if the test value matches this regex: /${this
+          .data.cases[i]!}/`,
       });
     }
 
@@ -60,9 +80,35 @@ export class MatchNodeImpl extends NodeImpl<MatchNode> {
       id: 'unmatched' as PortId,
       title: 'Unmatched',
       dataType: 'string',
+      description: 'The value (or test if value is unconnected) passed through if no regexes match.',
     });
 
     return outputs;
+  }
+
+  getBody(): NodeBody {
+    return dedent`
+      ${this.data.exclusive ? 'First Matching Case' : 'All Matching Cases'}
+      ${this.data.cases.length} Cases
+    `;
+  }
+
+  getEditors(): EditorDefinition<MatchNode>[] {
+    return [
+      {
+        type: 'toggle',
+        dataKey: 'exclusive',
+        label: 'Exclusive',
+        helperMessage: 'If enabled, only the first matching branch will be ran.',
+      },
+      {
+        type: 'stringList',
+        dataKey: 'cases',
+        label: 'Cases',
+        placeholder: 'Case (regular expression)',
+        helperMessage: '(Regular expressions)',
+      },
+    ];
   }
 
   static getUIData(): NodeUIData {
@@ -76,24 +122,30 @@ export class MatchNodeImpl extends NodeImpl<MatchNode> {
     };
   }
 
-  async process(inputs: Record<string, DataValue>): Promise<Record<string, DataValue>> {
-    const inputString = coerceType(inputs.input, 'string');
-    const cases = this.chartNode.data.cases;
+  async process(inputs: Inputs): Promise<Outputs> {
+    const inputString = coerceType(inputs['input' as PortId], 'string');
+    const value = inputs['value' as PortId];
+
+    const outputType = value === undefined ? 'string' : value.type;
+    const outputValue = value === undefined ? inputString : value.value;
+
+    const cases = this.data.cases;
     let matched = false;
-    const output: Record<string, DataValue> = {};
+    const output: Outputs = {};
 
     for (let i = 0; i < cases.length; i++) {
       const regExp = new RegExp(cases[i]!);
       const match = regExp.test(inputString);
 
-      if (match) {
+      const canMatch = !this.data.exclusive || !matched;
+      if (match && canMatch) {
         matched = true;
-        output[`case${i + 1}`] = {
-          type: 'string',
-          value: inputString,
-        };
+        output[`case${i + 1}` as PortId] = {
+          type: outputType,
+          value: outputValue,
+        } as DataValue;
       } else {
-        output[`case${i + 1}`] = {
+        output[`case${i + 1}` as PortId] = {
           type: 'control-flow-excluded',
           value: undefined,
         };
@@ -101,12 +153,12 @@ export class MatchNodeImpl extends NodeImpl<MatchNode> {
     }
 
     if (!matched) {
-      output.unmatched = {
-        type: 'string',
-        value: inputString,
-      };
+      output['unmatched' as PortId] = {
+        type: outputType,
+        value: outputValue,
+      } as DataValue;
     } else {
-      output.unmatched = {
+      output['unmatched' as PortId] = {
         type: 'control-flow-excluded',
         value: undefined,
       };

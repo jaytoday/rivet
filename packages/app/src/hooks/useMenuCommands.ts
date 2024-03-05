@@ -2,18 +2,19 @@ import { useEffect } from 'react';
 import { useSaveProject } from './useSaveProject.js';
 import { window } from '@tauri-apps/api';
 import { match } from 'ts-pattern';
-import { useNewProject } from './useNewProject.js';
-import { useLoadProject } from './useLoadProject.js';
+import { useLoadProjectWithFileBrowser } from './useLoadProjectWithFileBrowser.js';
 import { useRecoilState, useSetRecoilState } from 'recoil';
 import { settingsModalOpenState } from '../components/SettingsModal.js';
 import { graphState } from '../state/graph.js';
 import { useLoadRecording } from './useLoadRecording.js';
-import { WebviewWindow } from '@tauri-apps/api/window';
+import { type WebviewWindow } from '@tauri-apps/api/window';
 import { ioProvider } from '../utils/globals.js';
-import { debuggerPanelOpenState } from '../state/ui';
+import { helpModalOpenState, newProjectModalOpenState } from '../state/ui';
 import { useToggleRemoteDebugger } from '../components/DebuggerConnectPanel';
+import { lastRunDataByNodeState } from '../state/dataFlow';
+import { useImportGraph } from './useImportGraph';
 
-type MenuIds =
+export type MenuIds =
   | 'settings'
   | 'quit'
   | 'new_project'
@@ -24,7 +25,10 @@ type MenuIds =
   | 'import_graph'
   | 'run'
   | 'load_recording'
-  | 'remote_debugger';
+  | 'remote_debugger'
+  | 'toggle_devtools'
+  | 'clear_outputs'
+  | 'get_help';
 
 const handlerState: {
   handler: (e: { payload: MenuIds }) => void;
@@ -56,11 +60,14 @@ export function useMenuCommands(
 ) {
   const [graphData, setGraphData] = useRecoilState(graphState);
   const { saveProject, saveProjectAs } = useSaveProject();
-  const newProject = useNewProject();
-  const loadProject = useLoadProject();
+  const setNewProjectModalOpen = useSetRecoilState(newProjectModalOpenState);
+  const loadProject = useLoadProjectWithFileBrowser();
   const setSettingsOpen = useSetRecoilState(settingsModalOpenState);
   const { loadRecording } = useLoadRecording();
   const toggleRemoteDebugger = useToggleRemoteDebugger();
+  const setLastRunData = useSetRecoilState(lastRunDataByNodeState);
+  const importGraph = useImportGraph();
+  const setHelpModalOpen = useSetRecoilState(helpModalOpenState);
 
   useEffect(() => {
     const handler: (e: { payload: MenuIds }) => void = ({ payload }) => {
@@ -72,7 +79,7 @@ export function useMenuCommands(
           mainWindow.close();
         })
         .with('new_project', () => {
-          newProject();
+          setNewProjectModalOpen(true);
         })
         .with('open_project', () => {
           loadProject();
@@ -87,7 +94,7 @@ export function useMenuCommands(
           ioProvider.saveGraphData(graphData);
         })
         .with('import_graph', () => {
-          ioProvider.loadGraphData((data) => setGraphData(data));
+          importGraph();
         })
         .with('run', () => {
           options.onRunGraph?.();
@@ -97,6 +104,13 @@ export function useMenuCommands(
         })
         .with('remote_debugger', () => {
           toggleRemoteDebugger();
+        })
+        .with('toggle_devtools', () => {})
+        .with('clear_outputs', () => {
+          setLastRunData({});
+        })
+        .with('get_help', () => {
+          setHelpModalOpen(true);
         })
         .exhaustive();
     };
@@ -110,12 +124,15 @@ export function useMenuCommands(
   }, [
     saveProject,
     saveProjectAs,
-    newProject,
     loadProject,
     setSettingsOpen,
     graphData,
     setGraphData,
     options,
     loadRecording,
+    importGraph,
+    toggleRemoteDebugger,
+    setLastRunData,
+    setNewProjectModalOpen,
   ]);
 }

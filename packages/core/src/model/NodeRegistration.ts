@@ -1,6 +1,9 @@
-import { ChartNode, NodeImplConstructor, NodeDefinition, NodeImpl } from '../index.js';
-import { keys, mapValues, values } from '../utils/typeSafety.js';
-import { RivetPlugin } from './RivetPlugin.js';
+import { type ChartNode, type NodeImplConstructor, type NodeImpl, type PluginNodeImpl } from '../index.js';
+import { mapValues, values } from '../utils/typeSafety.js';
+import type { NodeDefinition, PluginNodeDefinition } from './NodeDefinition.js';
+import { type RivetPlugin } from './RivetPlugin.js';
+import { type RivetUIContext } from './RivetUIContext.js';
+import { PluginNodeImplClass } from './NodeImpl.js';
 
 export class NodeRegistration<NodeTypes extends string = never, Nodes extends ChartNode = never> {
   NodesType: Nodes = undefined!;
@@ -11,14 +14,14 @@ export class NodeRegistration<NodeTypes extends string = never, Nodes extends Ch
       displayName: string;
       impl: NodeImplConstructor<Extract<Nodes, { type: P }>>;
       plugin?: RivetPlugin;
+      pluginImpl?: PluginNodeImpl<Extract<Nodes, { type: P }>>;
     };
   };
 
-  #dynamicRegistered = [] as string[];
-  #plugins = [] as RivetPlugin[];
+  readonly #plugins = [] as RivetPlugin[];
 
-  #implsMap = {} as Record<string, NodeImplConstructor<ChartNode>>;
-  #nodeTypes = [] as NodeTypes[];
+  #implsMap = {} as Record<string, { impl: NodeImplConstructor<ChartNode>; pluginImpl?: PluginNodeImpl<ChartNode> }>;
+  readonly #nodeTypes = [] as NodeTypes[];
 
   register<T extends ChartNode>(
     definition: NodeDefinition<T>,
@@ -26,7 +29,7 @@ export class NodeRegistration<NodeTypes extends string = never, Nodes extends Ch
   ): NodeRegistration<NodeTypes | T['type'], Nodes | T> {
     const newRegistration = this as NodeRegistration<NodeTypes | T['type'], Nodes | T>;
 
-    const typeStr = definition.impl.create().type as T['type'];
+    const typeStr = definition.impl.create(undefined).type as T['type'];
 
     if (newRegistration.#infos[typeStr]) {
       throw new Error(`Duplicate node type: ${typeStr}`);
@@ -38,14 +41,59 @@ export class NodeRegistration<NodeTypes extends string = never, Nodes extends Ch
       plugin,
     };
 
-    newRegistration.#implsMap[typeStr] = definition.impl as any;
+    newRegistration.#implsMap[typeStr] = {
+      impl: definition.impl as any,
+      pluginImpl: undefined,
+    };
 
     newRegistration.#nodeTypes.push(typeStr);
 
     return newRegistration;
   }
 
-  get #dynamicImpls(): Record<string, NodeImplConstructor<ChartNode>> {
+  registerPluginNode<T extends ChartNode>(
+    definition: PluginNodeDefinition<T>,
+    plugin: RivetPlugin,
+  ): NodeRegistration<NodeTypes | T['type'], Nodes | T> {
+    const newRegistration = this as NodeRegistration<NodeTypes | T['type'], Nodes | T>;
+
+    const typeStr = definition.impl.create().type as T['type'];
+
+    if (newRegistration.#infos[typeStr]) {
+      throw new Error(`Duplicate node type: ${typeStr}`);
+    }
+
+    const pluginClass = class extends PluginNodeImplClass<T> {
+      static create() {
+        return definition.impl.create();
+      }
+
+      static getUIData(context: RivetUIContext) {
+        return definition.impl.getUIData(context);
+      }
+    };
+
+    newRegistration.#infos[typeStr] = {
+      displayName: definition.displayName,
+      impl: pluginClass as any,
+      plugin,
+      pluginImpl: definition.impl as any,
+    };
+
+    newRegistration.#implsMap[typeStr] = {
+      impl: pluginClass as any,
+      pluginImpl: definition.impl as any,
+    };
+
+    newRegistration.#nodeTypes.push(typeStr);
+
+    return newRegistration;
+  }
+
+  get #dynamicImpls(): Record<
+    string,
+    { impl: NodeImplConstructor<ChartNode>; pluginImpl?: PluginNodeImpl<ChartNode> }
+  > {
     return this.#implsMap;
   }
 
@@ -56,7 +104,7 @@ export class NodeRegistration<NodeTypes extends string = never, Nodes extends Ch
 
   registerPlugin(plugin: RivetPlugin) {
     if (plugin.register) {
-      plugin.register((definition) => this.register(definition, plugin));
+      plugin.register((definition) => this.registerPluginNode(definition, plugin));
     }
     this.#plugins.push(plugin);
   }
@@ -67,7 +115,7 @@ export class NodeRegistration<NodeTypes extends string = never, Nodes extends Ch
       throw new Error(`Unknown node type: ${type}`);
     }
 
-    return info.impl.create() as unknown as Extract<Nodes, { type: T }>;
+    return info.impl.create(info.pluginImpl) as unknown as Extract<Nodes, { type: T }>;
   }
 
   createDynamic(type: string): ChartNode {
@@ -75,7 +123,7 @@ export class NodeRegistration<NodeTypes extends string = never, Nodes extends Ch
     if (!implClass) {
       throw new Error(`Unknown node type: ${type}`);
     }
-    return implClass.create();
+    return implClass.impl.create(implClass.pluginImpl);
   }
 
   createImpl<T extends Nodes>(node: T): NodeImpl<T> {
@@ -87,9 +135,9 @@ export class NodeRegistration<NodeTypes extends string = never, Nodes extends Ch
       throw new Error(`Unknown node type: ${type}`);
     }
 
-    const { impl: ImplClass } = info;
+    const { impl: ImplClass, pluginImpl } = info;
 
-    const impl = new ImplClass(node as any) as unknown as NodeImpl<T>;
+    const impl = new ImplClass(node as any, pluginImpl) as unknown as NodeImpl<T>;
     if (!impl) {
       throw new Error(`Unknown node type: ${type}`);
     }
@@ -105,7 +153,8 @@ export class NodeRegistration<NodeTypes extends string = never, Nodes extends Ch
       throw new Error(`Unknown node type: ${type}`);
     }
 
-    const impl = new ImplClass(node) as unknown as NodeImpl<ChartNode>;
+    // eslint-disable-next-line new-cap
+    const impl = new ImplClass.impl(node, ImplClass.pluginImpl) as unknown as NodeImpl<ChartNode>;
     if (!impl) {
       throw new Error(`Unknown node type: ${type}`);
     }
@@ -141,7 +190,7 @@ export class NodeRegistration<NodeTypes extends string = never, Nodes extends Ch
   }
 
   getNodeConstructors(): NodeImplConstructor<ChartNode>[] {
-    return values(this.#dynamicImpls);
+    return values(this.#dynamicImpls).map((info) => info.impl);
   }
 
   getPluginFor(type: string): RivetPlugin | undefined {

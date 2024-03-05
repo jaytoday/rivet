@@ -1,7 +1,15 @@
-import { atom, atomFamily, selector } from 'recoil';
-import { ChartNode, GraphId, NodeId, NodeImpl, NodeInputDefinition, PortId } from '@ironclad/rivet-core';
+import { atom, atomFamily, selector, selectorFamily } from 'recoil';
+import {
+  type ChartNode,
+  type GraphId,
+  type NodeId,
+  NodeImpl,
+  type NodeInputDefinition,
+  type PortId,
+  type DataType,
+} from '@ironclad/rivet-core';
 import { recoilPersist } from 'recoil-persist';
-import { WireDef } from '../components/WireLayer.js';
+import { type WireDef } from '../components/WireLayer.js';
 import { mapValues } from 'lodash-es';
 
 const { persistAtom } = recoilPersist({ key: 'graphBuilder' });
@@ -26,7 +34,7 @@ export const canvasPositionState = atom<CanvasPosition>({
 export const lastCanvasPositionByGraphState = atom<Record<GraphId, CanvasPosition | undefined>>({
   key: 'lastCanvasPositionByGraph',
   default: {},
-  effects_UNSTABLE: [persistAtom],
+  effects: [persistAtom],
 });
 
 export const draggingNodesState = atom<ChartNode[]>({
@@ -44,7 +52,9 @@ export const sidebarOpenState = atom<boolean>({
   default: true,
 });
 
-export const draggingWireState = atom<WireDef | undefined>({
+export type DraggingWireDef = WireDef & { readonly dataType: DataType | Readonly<DataType[]> };
+
+export const draggingWireState = atom<DraggingWireDef | undefined>({
   key: 'draggingWire',
   default: undefined,
 });
@@ -56,7 +66,9 @@ export const isDraggingWireState = selector<boolean>({
   },
 });
 
-export const draggingWireClosestPortState = atom<{ nodeId: NodeId; portId: PortId } | undefined>({
+export const draggingWireClosestPortState = atom<
+  { nodeId: NodeId; portId: PortId; element: HTMLElement; definition: NodeInputDefinition } | undefined
+>({
   key: 'draggingWireClosestPort',
   default: undefined,
 });
@@ -70,4 +82,35 @@ export const graphNavigationStackState = atom<{
     stack: [],
     index: undefined,
   },
+});
+
+export const pinnedNodesState = atom<NodeId[]>({
+  key: 'pinnedNodes',
+  default: [],
+});
+
+export const isPinnedState = selectorFamily<boolean, NodeId>({
+  key: 'isPinned',
+  get:
+    (nodeId) =>
+    ({ get }) =>
+      get(pinnedNodesState).includes(nodeId),
+});
+
+export const searchingGraphState = atom({
+  key: 'searchingGraph',
+  default: {
+    searching: false,
+    query: '',
+  },
+});
+
+export const searchMatchingNodeIdsState = atom<NodeId[]>({
+  key: 'searchMatchingNodeIds',
+  default: [],
+});
+
+export const hoveringNodeState = atom<NodeId | undefined>({
+  key: 'hoveringNode',
+  default: undefined,
 });

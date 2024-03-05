@@ -1,36 +1,50 @@
-import { FC, useCallback, useMemo } from 'react';
+import { type FC, useCallback, useMemo } from 'react';
 import { TestCaseTable } from './TestCaseTable';
 import { InlineEditableTextfield } from '@atlaskit/inline-edit';
-import { GraphSelector } from '../DefaultNodeEditor';
 import { useRecoilState, useRecoilValue } from 'recoil';
 import { savedGraphsState } from '../../state/savedGraphs';
 import { keyBy } from 'lodash-es';
-import { NodeGraph } from '@ironclad/rivet-core';
+import { type GraphId, type NodeGraph } from '@ironclad/rivet-core';
 import { TestCaseEditor } from './TestCaseEditor';
 import { css } from '@emotion/react';
 import {
-  TrivetTestCase,
-  TrivetTestSuite,
+  type TrivetTestCase,
+  type TrivetTestSuite,
   validateTestCaseFormat,
   validateValidationGraphFormat,
 } from '@ironclad/trivet';
 import { trivetState } from '../../state/trivet';
 import Button from '@atlaskit/button';
-import { TryRunTests } from './api';
+import { type TryRunTests } from './api';
 import { useOpenUrl } from '../../hooks/useOpenUrl';
-import { ReactComponent as BrowserLineIcon } from 'majesticons/line/browser-line.svg';
-import { ReactComponent as AlertCircleIcon } from 'majesticons/line/alert-circle-line.svg';
+import BrowserLineIcon from 'majesticons/line/browser-line.svg?react';
+import AlertCircleIcon from 'majesticons/line/alert-circle-line.svg?react';
 import { NoTestCasesSplash } from './NoTestCasesSplash';
 import { useTestSuite } from '../../hooks/useTestSuite';
+import { GraphSelector } from '../editors/GraphSelectorEditor';
 
 const styles = css`
   min-height: 100%;
   position: relative;
   display: flex;
+  overflow: hidden;
+  height: 100%;
 
   .test-suite-area {
-    padding: 48px 20px 20px 20px;
+    padding: 48px 20px 40px 20px;
+    min-height: 0;
     flex: 1 1 auto;
+
+    display: flex;
+    flex-direction: column;
+  }
+
+  .test-suite-area-main {
+    display: flex;
+    flex-direction: column;
+
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   header {
@@ -245,14 +259,14 @@ export const TestSuite: FC<{ testSuite: TrivetTestSuite; tryRunTests: TryRunTest
 
             <div className="graph-selectors">
               <GraphSelector
-                value={testSuite.testGraph}
+                value={testSuite.testGraph as GraphId}
                 name="Test Graph"
                 label="Test Graph"
                 onChange={(graphId) => updateTestSuite({ ...testSuite, testGraph: graphId })}
                 isReadonly={false}
               />
               <GraphSelector
-                value={testSuite.validationGraph}
+                value={testSuite.validationGraph as GraphId}
                 name="Validation Graph"
                 label="Validation Graph"
                 onChange={(graphId) => updateTestSuite({ ...testSuite, validationGraph: graphId })}
@@ -261,7 +275,7 @@ export const TestSuite: FC<{ testSuite: TrivetTestSuite; tryRunTests: TryRunTest
             </div>
           </div>
         </header>
-        <div>
+        <div className="test-suite-area-main">
           {validationGraphValidationResults != null && !validationGraphValidationResults.valid && (
             <div className="validation-results">
               <AlertCircleIcon /> Validation graph requires a specific format. Please fix the following errors:

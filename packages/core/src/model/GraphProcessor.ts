@@ -1,35 +1,43 @@
 import { max, range, sum, uniqBy } from 'lodash-es';
-import { ControlFlowExcluded, ControlFlowExcludedPort } from '../utils/symbols.js';
 import {
-  DataValue,
-  ArrayDataValue,
-  AnyDataValue,
-  StringArrayDataValue,
-  ControlFlowExcludedDataValue,
+  type DataValue,
+  type ArrayDataValue,
+  type AnyDataValue,
+  type StringArrayDataValue,
+  type ControlFlowExcludedDataValue,
   isArrayDataValue,
   arrayizeDataValue,
-  ScalarOrArrayDataValue,
+  type ScalarOrArrayDataValue,
   getScalarTypeOf,
 } from './DataValue.js';
-import { ChartNode, NodeConnection, NodeId, NodeInputDefinition, NodeOutputDefinition, PortId } from './NodeBase.js';
-import { GraphId, NodeGraph } from './NodeGraph.js';
-import { NodeImpl } from './NodeImpl.js';
-import { UserInputNode, UserInputNodeImpl } from './nodes/UserInputNode.js';
+import type {
+  ChartNode,
+  NodeConnection,
+  NodeId,
+  NodeInputDefinition,
+  NodeOutputDefinition,
+  PortId,
+} from './NodeBase.js';
+import type { GraphId, NodeGraph } from './NodeGraph.js';
+import type { NodeImpl } from './NodeImpl.js';
+import type { UserInputNode, UserInputNodeImpl } from './nodes/UserInputNode.js';
 import PQueueImport from 'p-queue';
 import { getError } from '../utils/errors.js';
 import Emittery from 'emittery';
 import { entries, fromEntries, values } from '../utils/typeSafety.js';
 import { isNotNull } from '../utils/genericUtilFunctions.js';
-import { Project } from './Project.js';
-import { nanoid } from 'nanoid';
-import { InternalProcessContext, ProcessContext, ProcessId } from './ProcessContext.js';
-import { ExecutionRecorder } from '../recording/ExecutionRecorder.js';
+import type { Project } from './Project.js';
+import { nanoid } from 'nanoid/non-secure';
+import type { InternalProcessContext, ProcessContext, ProcessId } from './ProcessContext.js';
+import type { ExecutionRecorder } from '../recording/ExecutionRecorder.js';
 import { P, match } from 'ts-pattern';
-import { Opaque } from 'type-fest';
+import type { Opaque } from 'type-fest';
 import { coerceTypeOptional } from '../utils/coerceType.js';
-import { BuiltInNodeType, BuiltInNodes, globalRivetNodeRegistry } from './Nodes.js';
-import { NodeRegistration } from './NodeRegistration.js';
-import { StringPluginConfigurationSpec } from './RivetPlugin.js';
+import { globalRivetNodeRegistry } from './Nodes.js';
+import type { BuiltInNodeType, BuiltInNodes } from './Nodes.js';
+import type { NodeRegistration } from './NodeRegistration.js';
+import { getPluginConfig } from '../utils/index.js';
+import { GptTokenizerTokenizer } from '../integrations/GptTokenizerTokenizer.js';
 
 // CJS compatibility, gets default.default for whatever reason
 let PQueue = PQueueImport;
@@ -39,7 +47,7 @@ if (typeof PQueue !== 'function') {
 
 export type ProcessEvents = {
   /** Called when processing has started. */
-  start: { project: Project; inputs: GraphInputs; contextValues: Record<string, DataValue> };
+  start: { project: Project; startGraph: NodeGraph; inputs: GraphInputs; contextValues: Record<string, DataValue> };
 
   /** Called when a graph or subgraph has started. */
   graphStart: { graph: NodeGraph; inputs: GraphInputs };
@@ -63,7 +71,7 @@ export type ProcessEvents = {
   nodeError: { node: ChartNode; error: Error | string; processId: ProcessId };
 
   /** Called when a node has been excluded from processing. */
-  nodeExcluded: { node: ChartNode; processId: ProcessId };
+  nodeExcluded: { node: ChartNode; processId: ProcessId; inputs: Inputs; outputs: Outputs; reason: string };
 
   /** Called when a user input node requires user input. Call the callback when finished, or call userInput() on the GraphProcessor with the results. */
   userInput: {
@@ -88,6 +96,9 @@ export type ProcessEvents = {
   /** Called when processing has been aborted. */
   abort: { successful: boolean; error?: string | Error };
 
+  /** Called when processing has finished either successfully or unsuccessfully. */
+  finish: void;
+
   /** Called for trace level logs. */
   trace: string;
 
@@ -99,12 +110,19 @@ export type ProcessEvents = {
 
   /** Called when a global variable has been set in a graph. */
   globalSet: { id: string; value: ScalarOrArrayDataValue; processId: ProcessId };
+
+  /** Called when an AbortController has been created. Used by node to increase the max event listeners. */
+  newAbortController: AbortController;
 } & {
   /** Listen for any user event. */
   [key: `userEvent:${string}`]: DataValue | undefined;
 } & {
   [key: `globalSet:${string}`]: ScalarOrArrayDataValue | undefined;
 };
+
+export type ProcessEvent = {
+  [P in keyof ProcessEvents]: { type: P } & ProcessEvents[P];
+}[keyof ProcessEvents];
 
 export type GraphOutputs = Record<string, DataValue>;
 export type GraphInputs = Record<string, DataValue>;
@@ -120,9 +138,9 @@ export type ExternalFunction = (
   ...args: unknown[]
 ) => Promise<DataValue & { cost?: number }>;
 
-type RaceId = Opaque<string, 'RaceId'>;
+export type RaceId = Opaque<string, 'RaceId'>;
 
-type LoopInfo = AttachedNodeDataItem & {
+export type LoopInfo = AttachedNodeDataItem & {
   /** ID of the controller of the loop */
   loopControllerId: NodeId;
 
@@ -132,11 +150,11 @@ type LoopInfo = AttachedNodeDataItem & {
   iterationCount: number;
 };
 
-type AttachedNodeDataItem = {
+export type AttachedNodeDataItem = {
   propagate: boolean | ((parent: ChartNode, connections: NodeConnection[]) => boolean);
 };
 
-type AttachedNodeData = {
+export type AttachedNodeData = {
   loopInfo?: LoopInfo;
   races?: {
     propagate: boolean;
@@ -151,23 +169,25 @@ type AttachedNodeData = {
 
 export class GraphProcessor {
   // Per-instance state
-  #graph: NodeGraph;
-  #project: Project;
-  #nodesById: Record<NodeId, ChartNode>;
-  #nodeInstances: Record<NodeId, NodeImpl<ChartNode>>;
-  #connections: Record<NodeId, NodeConnection[]>;
-  #definitions: Record<NodeId, { inputs: NodeInputDefinition[]; outputs: NodeOutputDefinition[] }>;
-  #emitter: Emittery<ProcessEvents> = new Emittery();
+  readonly #graph: NodeGraph;
+  readonly #project: Project;
+  readonly #nodesById: Record<NodeId, ChartNode>;
+  readonly #nodeInstances: Record<NodeId, NodeImpl<ChartNode>>;
+  readonly #connections: Record<NodeId, NodeConnection[]>;
+  readonly #definitions: Record<NodeId, { inputs: NodeInputDefinition[]; outputs: NodeOutputDefinition[] }>;
+  readonly #emitter: Emittery<ProcessEvents> = new Emittery();
   #running = false;
   #isSubProcessor = false;
-  #scc: ChartNode[][];
-  #nodesNotInCycle: ChartNode[];
+  readonly #scc: ChartNode[][];
+  readonly #nodesNotInCycle: ChartNode[];
   #externalFunctions: Record<string, ExternalFunction> = {};
   slowMode = false;
   #isPaused = false;
   #parent: GraphProcessor | undefined;
-  #registry: NodeRegistration;
+  readonly #registry: NodeRegistration;
   id = nanoid();
+
+  executor?: 'nodejs' | 'browser';
 
   /** If set, specifies the node(s) that the graph will run TO, instead of the nodes without any dependents. */
   runToNodeIds?: NodeId[];
@@ -222,9 +242,13 @@ export class GraphProcessor {
     return this.#running;
   }
 
-  constructor(project: Project, graphId: GraphId, registry?: NodeRegistration) {
+  constructor(project: Project, graphId?: GraphId, registry?: NodeRegistration) {
     this.#project = project;
-    const graph = project.graphs[graphId];
+    const graph = graphId
+      ? project.graphs[graphId]
+      : project.metadata.mainGraphId
+        ? project.graphs[project.metadata.mainGraphId]
+        : undefined;
 
     if (!graph) {
       throw new Error(`Graph ${graphId} not found in project`);
@@ -335,7 +359,7 @@ export class GraphProcessor {
     this.#scc = this.#tarjanSCC();
     this.#nodesNotInCycle = this.#scc.filter((cycle) => cycle.length === 1).flat();
 
-    this.setExternalFunction('echo', async (value) => ({ type: 'any', value } satisfies DataValue));
+    this.setExternalFunction('echo', async (value) => ({ type: 'any', value }) satisfies DataValue);
 
     this.#emitter.on('globalSet', ({ id, value }) => {
       this.#emitter.emit(`globalSet:${id}`, value);
@@ -348,7 +372,7 @@ export class GraphProcessor {
   onAny = undefined! as Emittery<ProcessEvents>['onAny'];
   offAny = undefined! as Emittery<ProcessEvents>['offAny'];
 
-  #onUserEventHandlers: Map<(event: DataValue | undefined) => void, Function> = new Map();
+  readonly #onUserEventHandlers: Map<(event: DataValue | undefined) => void, Function> = new Map();
 
   onUserEvent(onEvent: string, listener: (event: DataValue | undefined) => void): void {
     const handler = (event: string, value: unknown) => {
@@ -426,6 +450,16 @@ export class GraphProcessor {
     await this.#emitter.once('resume');
   }
 
+  async *events(): AsyncGenerator<ProcessEvent> {
+    for await (const [event, data] of this.#emitter.anyEvent()) {
+      yield { type: event, ...(data as any) };
+
+      if (event === 'finish') {
+        break;
+      }
+    }
+  }
+
   async replayRecording(recorder: ExecutionRecorder): Promise<GraphOutputs> {
     const { events } = recorder;
 
@@ -470,6 +504,7 @@ export class GraphProcessor {
               project: this.#project,
               contextValues: data.contextValues,
               inputs: data.inputs,
+              startGraph: getGraph(data.startGraph),
             });
             this.#contextValues = data.contextValues;
             this.#graphInputs = data.inputs;
@@ -556,6 +591,9 @@ export class GraphProcessor {
             this.#emitter.emit('nodeExcluded', {
               node: getNode(data.nodeId),
               processId: data.processId,
+              inputs: data.inputs,
+              outputs: data.outputs,
+              reason: data.reason,
             });
 
             this.#visitedNodes.add(data.nodeId);
@@ -575,6 +613,10 @@ export class GraphProcessor {
           })
           .with({ type: P.string.startsWith('userEvent:') }, ({ type, data }) => {
             this.#emitter.emit(type, data);
+          })
+          .with({ type: 'newAbortController' }, () => {})
+          .with({ type: 'finish' }, () => {
+            this.#emitter.emit('finish', undefined);
           })
           .with(undefined, () => {})
           .exhaustive();
@@ -606,7 +648,7 @@ export class GraphProcessor {
     this.#globals ??= new Map();
     this.#ignoreNodes = new Set();
 
-    this.#abortController = new AbortController();
+    this.#abortController = this.#newAbortController();
     this.#abortController.signal.addEventListener('abort', () => {
       this.#aborted = true;
     });
@@ -638,11 +680,18 @@ export class GraphProcessor {
       this.#graphInputs = inputs;
       this.#contextValues ??= contextValues;
 
+      if (this.#context.tokenizer) {
+        this.#context.tokenizer.on('error', (error) => {
+          this.#emitter.emit('error', { error });
+        });
+      }
+
       if (!this.#isSubProcessor) {
         this.#emitter.emit('start', {
           contextValues: this.#contextValues,
           inputs: this.#graphInputs,
           project: this.#project,
+          startGraph: this.#graph,
         });
       }
 
@@ -712,11 +761,16 @@ export class GraphProcessor {
 
       if (!this.#isSubProcessor) {
         this.#emitter.emit('done', { results: outputValues });
+        this.#emitter.emit('finish', undefined);
       }
 
       return outputValues;
     } finally {
       this.#running = false;
+
+      if (!this.#isSubProcessor) {
+        this.#emitter.emit('finish', undefined);
+      }
     }
   }
 
@@ -838,9 +892,7 @@ export class GraphProcessor {
 
     // Excluded because control flow is still in a loop - difference between "will not execute" and "has not executed yet"
     const inputValues = this.#getInputValuesForNode(node);
-    if (node.title === 'Graph Output') {
-      this.#emitter.emit('trace', `Node ${node.title} has input values ${JSON.stringify(inputValues)}`);
-    }
+
     if (this.#excludedDueToControlFlow(node, inputValues, nanoid() as ProcessId, 'loop-not-broken')) {
       this.#emitter.emit('trace', `Node ${node.title} is excluded due to control flow`);
       return;
@@ -912,11 +964,10 @@ export class GraphProcessor {
       const loopControllerResults = this.#nodeResults.get(node.id)!;
 
       // If the loop controller is excluded, we have to "break" it or else it'll loop forever...
+      const breakValue = loopControllerResults['break' as PortId];
       const didBreak =
-        loopControllerResults['break' as PortId]?.type !== 'control-flow-excluded' ??
+        !(breakValue?.type === 'control-flow-excluded' && breakValue?.value === 'loop-not-broken') ??
         this.#excludedDueToControlFlow(node, this.#getInputValuesForNode(node), nanoid() as ProcessId);
-
-      this.#emitter.emit('trace', JSON.stringify(this.#nodeResults.get(node.id)));
 
       if (!didBreak) {
         this.#emitter.emit('trace', `Loop controller ${node.title} did not break, so we're looping again`);
@@ -927,7 +978,6 @@ export class GraphProcessor {
           this.#currentlyProcessing.delete(cycleNode.id);
           this.#remainingNodes.add(cycleNode.id);
           this.#nodeResults.delete(cycleNode.id);
-          // this.#emitter.emit('nodeOutputsCleared', { node: cycleNode });
         }
       }
     }
@@ -982,17 +1032,6 @@ export class GraphProcessor {
       };
 
       attachedData.loopInfo = childLoopInfo; // Not 100% sure if this is right - sets the childLoopInfo on the loop controller itself, probably fine?
-
-      if (childLoopInfo.iterationCount > (builtInNode.data.maxIterations ?? 100)) {
-        this.#nodeErrored(
-          node,
-          new Error(
-            `Loop controller ${node.title} has exceeded max iterations of ${builtInNode.data.maxIterations ?? 100}`,
-          ),
-          processId,
-        );
-        return;
-      }
     }
 
     for (const { node: outputNode, connections: connectionsToOutputNode } of outputNodes.connectionsToNodes) {
@@ -1040,7 +1079,6 @@ export class GraphProcessor {
 
   async #processNode(node: ChartNode) {
     const processId = nanoid() as ProcessId;
-    const builtInNode = node as BuiltInNodes;
 
     if (this.#abortController.signal.aborted) {
       this.#nodeErrored(node, new Error('Processing aborted'), processId);
@@ -1135,8 +1173,25 @@ export class GraphProcessor {
     this.#emitter.emit('nodeStart', { node, inputs: inputValues, processId });
 
     try {
-      const results = await Promise.all(
-        range(0, splittingAmount).map(async (i) => {
+      let results: (
+        | {
+            type: string;
+            output: Outputs;
+            error?: Error;
+          }
+        | {
+            type: string;
+            error: Error;
+            output?: Outputs;
+          }
+      )[] = [];
+
+      if (node.isSplitSequential) {
+        for (let i = 0; i < splittingAmount; i++) {
+          if (this.#aborted) {
+            throw new Error('Processing aborted');
+          }
+
           const inputs = fromEntries(
             entries(inputValues).map(([port, value]) => [
               port as PortId,
@@ -1153,12 +1208,45 @@ export class GraphProcessor {
               (node, partialOutputs, index) =>
                 this.#emitter.emit('partialOutput', { node, outputs: partialOutputs, index, processId }),
             );
-            return { type: 'output', output };
+
+            if (output['cost' as PortId]?.type === 'number') {
+              this.#totalCost += coerceTypeOptional(output['cost' as PortId], 'number') ?? 0;
+            }
+            results.push({ type: 'output', output });
           } catch (error) {
-            return { type: 'error', error: getError(error) };
+            results.push({ type: 'error', error: getError(error) });
           }
-        }),
-      );
+        }
+      } else {
+        results = await Promise.all(
+          range(0, splittingAmount).map(async (i) => {
+            const inputs = fromEntries(
+              entries(inputValues).map(([port, value]) => [
+                port as PortId,
+                isArrayDataValue(value) ? arrayizeDataValue(value)[i] ?? undefined : value,
+              ]),
+            );
+
+            try {
+              const output = await this.#processNodeWithInputData(
+                node,
+                inputs as Inputs,
+                i,
+                processId,
+                (node, partialOutputs, index) =>
+                  this.#emitter.emit('partialOutput', { node, outputs: partialOutputs, index, processId }),
+              );
+
+              if (output['cost' as PortId]?.type === 'number') {
+                this.#totalCost += coerceTypeOptional(output['cost' as PortId], 'number') ?? 0;
+              }
+              return { type: 'output', output };
+            } catch (error) {
+              return { type: 'error', error: getError(error) };
+            }
+          }),
+        );
+      }
 
       const errors = results.filter((r) => r.type === 'error').map((r) => r.error!);
       if (errors.length === 1) {
@@ -1242,6 +1330,12 @@ export class GraphProcessor {
     }
   }
 
+  #newAbortController() {
+    const controller = new AbortController();
+    this.#emitter.emit('newAbortController', controller);
+    return controller;
+  }
+
   async #processNodeWithInputData(
     node: ChartNode,
     inputValues: Inputs,
@@ -1250,20 +1344,31 @@ export class GraphProcessor {
     partialOutput?: (node: ChartNode, partialOutputs: Outputs, index: number) => void,
   ) {
     const instance = this.#nodeInstances[node.id]!;
-    const nodeAbortController = new AbortController();
-    this.#nodeAbortControllers.set(`${node.id}-${processId}`, nodeAbortController);
-    this.#abortController.signal.addEventListener('abort', () => {
+    const nodeAbortController = this.#newAbortController();
+    const abortListener = () => {
       nodeAbortController.abort();
-    });
+    };
+    this.#nodeAbortControllers.set(`${node.id}-${processId}`, nodeAbortController);
+    this.#abortController.signal.addEventListener('abort', abortListener);
 
     const plugin = this.#registry.getPluginFor(node.type);
 
+    let tokenizer = this.#context.tokenizer;
+    if (!tokenizer) {
+      tokenizer = new GptTokenizerTokenizer();
+      tokenizer.on('error', (e) => this.#emitter.emit('error', { error: e }));
+    }
+
     const context: InternalProcessContext = {
       ...this.#context,
+      node,
+      tokenizer,
+      executor: this.executor ?? 'nodejs',
       project: this.#project,
       executionCache: this.#executionCache,
       graphInputs: this.#graphInputs,
       graphOutputs: this.#graphOutputs,
+      attachedData: this.#getAttachedDataTo(node),
       waitEvent: async (event) => {
         return new Promise((resolve, reject) => {
           this.#emitter.once(`userEvent:${event}`).then(resolve).catch(reject);
@@ -1308,8 +1413,9 @@ export class GraphProcessor {
         await this.getRootProcessor().#emitter.once(`globalSet:${id}`);
         return this.#globals.get(id)!;
       },
-      createSubProcessor: (subGraphId: GraphId, { signal }: { signal?: AbortSignal } = {}) => {
-        const processor = new GraphProcessor(this.#project, subGraphId);
+      createSubProcessor: (subGraphId: GraphId | undefined, { signal }: { signal?: AbortSignal } = {}) => {
+        const processor = new GraphProcessor(this.#project, subGraphId, this.#registry);
+        processor.executor = this.executor;
         processor.#isSubProcessor = true;
         processor.#executionCache = this.#executionCache;
         processor.#externalFunctions = this.#externalFunctions;
@@ -1368,41 +1474,13 @@ export class GraphProcessor {
       abortGraph: (error) => {
         this.abort(error === undefined, error);
       },
-      getPluginConfig: (name) => {
-        if (!plugin) {
-          return undefined;
-        }
-
-        const configSpec = plugin?.configSpec?.[name];
-
-        if (!configSpec) {
-          return undefined;
-        }
-
-        const pluginSettings = this.#context.settings.pluginSettings?.[plugin.id];
-        if (pluginSettings) {
-          const value = pluginSettings[name];
-          if (!value || typeof value !== 'string') {
-            return undefined;
-          }
-
-          return value;
-        }
-
-        const envFallback = (configSpec as StringPluginConfigurationSpec).pullEnvironmentVariable;
-        const envFallbackName = envFallback === true ? name : envFallback;
-
-        if (envFallbackName && this.#context.settings.pluginEnv?.[envFallbackName]) {
-          return this.#context.settings.pluginEnv[envFallbackName];
-        }
-
-        return undefined;
-      },
+      getPluginConfig: (name) => getPluginConfig(plugin, this.#context.settings, name),
     };
 
     await this.#waitUntilUnpaused();
     const results = await instance.process(inputValues, context);
     this.#nodeAbortControllers.delete(`${node.id}-${processId}`);
+    this.#abortController.signal.removeEventListener('abort', abortListener);
 
     if (nodeAbortController.signal.aborted) {
       throw new Error('Aborted');
@@ -1417,32 +1495,25 @@ export class GraphProcessor {
     processId: ProcessId,
     typeOfExclusion: ControlFlowExcludedDataValue['value'] = undefined,
   ) {
-    const inputValuesList = values(inputValues);
-    const controlFlowExcludedValues = inputValuesList.filter(
-      (value) =>
+    if (node.disabled) {
+      this.#emitter.emit('trace', `Excluding node ${node.title} because it's disabled`);
+
+      this.#visitedNodes.add(node.id);
+      this.#markAsExcluded(node, processId, inputValues, 'disabled');
+
+      return true;
+    }
+
+    const inputsWithValues = entries(inputValues);
+    const controlFlowExcludedValues = inputsWithValues.filter(
+      ([, value]) =>
         value &&
         getScalarTypeOf(value.type) === 'control-flow-excluded' &&
         (!typeOfExclusion || value.value === typeOfExclusion),
     );
-    const inputIsExcludedValue = inputValuesList.length > 0 && controlFlowExcludedValues.length > 0;
+    const inputIsExcludedValue = inputsWithValues.length > 0 && controlFlowExcludedValues.length > 0;
 
-    const inputConnections = this.#connections[node.id]?.filter((conn) => conn.inputNodeId === node.id) ?? [];
-    const outputNodes = inputConnections
-      .map((conn) => this.#nodesById[conn.outputNodeId])
-      .filter(isNotNull) as ChartNode[];
-
-    const anyOutputIsExcludedValue =
-      outputNodes.length > 0 &&
-      outputNodes.some((outputNode) => {
-        const outputValues = this.#nodeResults.get(outputNode.id) ?? {};
-        const outputControlFlowExcluded = outputValues[ControlFlowExcluded as unknown as PortId];
-        if (outputControlFlowExcluded && (!typeOfExclusion || outputControlFlowExcluded.value === typeOfExclusion)) {
-          return true;
-        }
-        return false;
-      });
-
-    const isWaitingForLoop = controlFlowExcludedValues.some((value) => value?.value === 'loop-not-broken');
+    const isWaitingForLoop = controlFlowExcludedValues.some((value) => value?.[1]?.value === 'loop-not-broken');
 
     const nodesAllowedToConsumeExcludedValue: BuiltInNodeType[] = [
       'if',
@@ -1450,19 +1521,23 @@ export class GraphProcessor {
       'coalesce',
       'graphOutput',
       'raceInputs',
+      'loopController',
     ];
 
     const allowedToConsumedExcludedValue =
       nodesAllowedToConsumeExcludedValue.includes(node.type as BuiltInNodeType) && !isWaitingForLoop;
 
-    if ((inputIsExcludedValue || anyOutputIsExcludedValue) && !allowedToConsumedExcludedValue) {
+    if (inputIsExcludedValue && !allowedToConsumedExcludedValue) {
       if (!isWaitingForLoop) {
-        this.#emitter.emit('trace', `Excluding node ${node.title} because of control flow.`);
-        this.#emitter.emit('nodeExcluded', { node, processId });
+        if (inputIsExcludedValue) {
+          this.#emitter.emit(
+            'trace',
+            `Excluding node ${node.title} because of control flow. Input is has excluded value: ${controlFlowExcludedValues[0]?.[0]}`,
+          );
+        }
+
         this.#visitedNodes.add(node.id);
-        this.#nodeResults.set(node.id, {
-          [ControlFlowExcluded as unknown as PortId]: { type: 'control-flow-excluded', value: undefined },
-        });
+        this.#markAsExcluded(node, processId, inputValues, 'input is excluded value');
       }
 
       return true;
@@ -1471,29 +1546,47 @@ export class GraphProcessor {
     return false;
   }
 
+  #markAsExcluded(node: ChartNode, processId: ProcessId, inputValues: Inputs, reason: string) {
+    const outputs: Outputs = {};
+    for (const output of this.#definitions[node.id]!.outputs) {
+      outputs[output.id] = { type: 'control-flow-excluded', value: undefined };
+    }
+
+    // Prevent infinite loop, a control-flow-excluded to loop controller shouldn't set the break port, let the loop controller handle it
+    if (node.type === 'loopController') {
+      outputs['break' as PortId] = { type: 'control-flow-excluded', value: 'loop-not-broken' };
+    }
+
+    this.#nodeResults.set(node.id, outputs);
+
+    this.#emitter.emit('nodeExcluded', {
+      node,
+      processId,
+      inputs: inputValues,
+      outputs,
+      reason,
+    });
+  }
+
   #getInputValuesForNode(node: ChartNode): Inputs {
     const connections = this.#connections[node.id];
-    return this.#definitions[node.id]!.inputs.reduce((values, input) => {
-      if (!connections) {
-        return values;
-      }
-      const connection = connections.find((conn) => conn.inputId === input.id && conn.inputNodeId === node.id);
-      if (connection) {
-        const outputNode = this.#nodeInstances[connection.outputNodeId]!.chartNode;
-        const outputNodeOutputs = this.#nodeResults.get(outputNode.id);
-        const outputResult = outputNodeOutputs?.[connection.outputId];
-
-        values[input.id] = outputResult;
-
-        if (outputNodeOutputs?.[ControlFlowExcludedPort]) {
-          values[ControlFlowExcludedPort] = {
-            type: 'control-flow-excluded',
-            value: undefined,
-          };
+    return this.#definitions[node.id]!.inputs.reduce(
+      (values, input) => {
+        if (!connections) {
+          return values;
         }
-      }
-      return values;
-    }, {} as Record<string, any>);
+        const connection = connections.find((conn) => conn.inputId === input.id && conn.inputNodeId === node.id);
+        if (connection) {
+          const outputNode = this.#nodeInstances[connection.outputNodeId]!.chartNode;
+          const outputNodeOutputs = this.#nodeResults.get(outputNode.id);
+          const outputResult = outputNodeOutputs?.[connection.outputId];
+
+          values[input.id] = outputResult;
+        }
+        return values;
+      },
+      {} as Record<string, any>,
+    );
   }
 
   /** Gets the nodes that are inputting to the given node. */

@@ -1,16 +1,16 @@
 import {
-  NodeGraph,
-  Project,
+  type NodeGraph,
+  type Project,
   ExecutionRecorder,
   deserializeGraph,
   deserializeProject,
   serializeGraph,
   serializeProject,
 } from '@ironclad/rivet-core';
-import { IOProvider } from './IOProvider.js';
+import { type IOProvider } from './IOProvider.js';
 import {
-  SerializedTrivetData,
-  TrivetData,
+  type SerializedTrivetData,
+  type TrivetData,
   TrivetTestSuite,
   deserializeTrivetData,
   serializeTrivetData,
@@ -75,6 +75,10 @@ export class LegacyBrowserIOProvider implements IOProvider {
     input.click();
   }
 
+  async loadProjectDataNoPrompt(path: string): Promise<{ project: Project; testData: TrivetData }> {
+    throw new Error('Function not supported in the browser');
+  }
+
   async loadRecordingData(callback: (data: { recorder: ExecutionRecorder; path: string }) => void): Promise<void> {
     const input = document.createElement('input');
     input.type = 'file';
@@ -135,5 +139,13 @@ export class LegacyBrowserIOProvider implements IOProvider {
       reader.readAsArrayBuffer(file);
     };
     input.click();
+  }
+
+  async readPathAsString(path: string): Promise<string> {
+    throw new Error('Function not supported in the browser');
+  }
+
+  async readPathAsBinary(path: string): Promise<Uint8Array> {
+    throw new Error('Function not supported in the browser');
   }
 }

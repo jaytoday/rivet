@@ -26,6 +26,7 @@ dist
 *.tsbuildinfo
 
 packages/app-executor/bin/executor-bundle.js
+packages/app-executor/bin/executor-bundle.cjs
 
 .yarn/*
 !.yarn/cache
@@ -36,3 +37,7 @@ packages/app-executor/bin/executor-bundle.js
 !.yarn/versions
 
 .turbo
+
+.idea
+
+packages/app/stats.html

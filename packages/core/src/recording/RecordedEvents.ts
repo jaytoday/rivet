@@ -1,16 +1,16 @@
-import { Opaque, OverrideProperties } from 'type-fest';
+import type { Opaque, OverrideProperties } from 'type-fest';
 import {
-  ProcessEvents,
-  ProjectId,
-  GraphInputs,
-  DataValue,
-  GraphId,
-  GraphOutputs,
-  NodeId,
-  Inputs,
-  ProcessId,
-  Outputs,
-  StringArrayDataValue,
+  type ProcessEvents,
+  type ProjectId,
+  type GraphInputs,
+  type DataValue,
+  type GraphId,
+  type GraphOutputs,
+  type NodeId,
+  type Inputs,
+  type ProcessId,
+  type Outputs,
+  type StringArrayDataValue,
 } from '../index.js';
 
 export type RecordingId = Opaque<string, 'RecordingId'>;
@@ -18,7 +18,7 @@ export type RecordingId = Opaque<string, 'RecordingId'>;
 export type RecordedEventsMap = OverrideProperties<
   ProcessEvents,
   {
-    start: { projectId: ProjectId; inputs: GraphInputs; contextValues: Record<string, DataValue> };
+    start: { projectId: ProjectId; inputs: GraphInputs; contextValues: Record<string, DataValue>; startGraph: GraphId };
 
     /** Called when a graph or subgraph has started. */
     graphStart: { graphId: GraphId; inputs: GraphInputs };
@@ -42,7 +42,7 @@ export type RecordedEventsMap = OverrideProperties<
     nodeError: { nodeId: NodeId; error: string; processId: ProcessId };
 
     /** Called when a node has been excluded from processing. */
-    nodeExcluded: { nodeId: NodeId; processId: ProcessId };
+    nodeExcluded: { nodeId: NodeId; processId: ProcessId; inputs: Inputs; outputs: Outputs; reason: string };
 
     /** Called when a user input node requires user input. Call the callback when finished, or call userInput() on the GraphProcessor with the results. */
     userInput: {
@@ -60,6 +60,8 @@ export type RecordedEventsMap = OverrideProperties<
 
     /** Called when the root graph has errored. The root graph will also throw. */
     error: { error: string };
+
+    newAbortController: undefined;
   }
 >;
 

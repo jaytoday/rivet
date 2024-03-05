@@ -1,10 +1,18 @@
-import { ChartNode, NodeId, NodeInputDefinition, NodeOutputDefinition, PortId } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { Inputs, Outputs } from '../GraphProcessor.js';
-import { EditorDefinition, coerceType, coerceTypeOptional } from '../../index.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+  type PortId,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type Inputs, type Outputs } from '../GraphProcessor.js';
+import { type EditorDefinition } from '../../index.js';
 import { match } from 'ts-pattern';
 import { dedent } from 'ts-dedent';
+import { coerceType, coerceTypeOptional } from '../../utils/coerceType.js';
 
 export type EvaluateNode = ChartNode<'evaluate', EvaluateNodeData>;
 
@@ -123,7 +131,7 @@ export class EvaluateNodeImpl extends NodeImpl<EvaluateNode> {
       `,
       infoBoxTitle: 'Evaluate Node',
       contextMenuTitle: 'Evaluate',
-      group: ['Logic'],
+      group: ['Numbers'],
     };
   }
 

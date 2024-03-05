@@ -2,16 +2,22 @@ import { save, open } from '@tauri-apps/api/dialog';
 import { writeFile, readTextFile, readBinaryFile } from '@tauri-apps/api/fs';
 import {
   ExecutionRecorder,
-  NodeGraph,
-  Project,
+  type NodeGraph,
+  type Project,
   deserializeGraph,
   deserializeProject,
   serializeGraph,
   serializeProject,
 } from '@ironclad/rivet-core';
-import { IOProvider } from './IOProvider.js';
+import { type IOProvider } from './IOProvider.js';
 import { isInTauri } from '../utils/tauri.js';
-import { SerializedTrivetData, TrivetData, deserializeTrivetData, serializeTrivetData } from '@ironclad/trivet';
+import {
+  type SerializedTrivetData,
+  type TrivetData,
+  deserializeTrivetData,
+  serializeTrivetData,
+} from '@ironclad/trivet';
+import { saveDatasetsFile, loadDatasetsFile } from './datasets.js';
 
 export class TauriIOProvider implements IOProvider {
   static isSupported(): boolean {
@@ -62,6 +68,8 @@ export class TauriIOProvider implements IOProvider {
         path: filePath,
       });
 
+      await saveDatasetsFile(filePath, project);
+
       return filePath;
     }
 
@@ -77,6 +85,8 @@ export class TauriIOProvider implements IOProvider {
       contents: data,
       path,
     });
+
+    await saveDatasetsFile(path, project);
   }
 
   async loadGraphData(callback: (graphData: NodeGraph) => void) {
@@ -101,7 +111,7 @@ export class TauriIOProvider implements IOProvider {
   }
 
   async loadProjectData(callback: (data: { project: Project; testData: TrivetData; path: string }) => void) {
-    const path = await open({
+    const path = (await open({
       filters: [
         {
           name: 'Rivet Project',
@@ -112,18 +122,25 @@ export class TauriIOProvider implements IOProvider {
       directory: false,
       recursive: false,
       title: 'Open graph',
-    });
+    })) as string | undefined;
 
     if (path) {
-      const data = await readTextFile(path as string);
-      const [projectData, attachedData] = deserializeProject(data);
-
-      const trivetData = attachedData.trivet
-        ? deserializeTrivetData(attachedData.trivet as SerializedTrivetData)
-        : { testSuites: [] };
-
-      callback({ project: projectData, testData: trivetData, path: path as string });
+      const projectData = await this.loadProjectDataNoPrompt(path);
+      callback({ ...projectData, path });
     }
+  }
+
+  async loadProjectDataNoPrompt(path: string): Promise<{ project: Project; testData: TrivetData }> {
+    const data = await readTextFile(path);
+    const [projectData, attachedData] = deserializeProject(data);
+
+    const trivetData = attachedData.trivet
+      ? deserializeTrivetData(attachedData.trivet as SerializedTrivetData)
+      : { testSuites: [] };
+
+    await loadDatasetsFile(path, projectData);
+
+    return { project: projectData, testData: trivetData };
   }
 
   async loadRecordingData(callback: (data: { recorder: ExecutionRecorder; path: string }) => void) {
@@ -206,5 +223,15 @@ export class TauriIOProvider implements IOProvider {
       const contents = await readBinaryFile(path as string);
       callback(contents);
     }
+  }
+
+  async readPathAsString(path: string): Promise<string> {
+    const contents = await readTextFile(path);
+    return contents;
+  }
+
+  async readPathAsBinary(path: string): Promise<Uint8Array> {
+    const contents = await readBinaryFile(path);
+    return contents;
   }
 }

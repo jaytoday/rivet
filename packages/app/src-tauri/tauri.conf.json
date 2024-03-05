@@ -7,24 +7,43 @@
   },
   "package": {
     "productName": "Rivet",
-    "version": "1.0.1"
+    "version": "1.7.8"
   },
   "tauri": {
     "allowlist": {
       "all": false,
       "fs": {
         "all": true,
-        "scope": []
+        "scope": ["$APPLOCALDATA/**", "$APPLOCALDATA/**/.*", "$TEMP/**"]
+      },
+      "path": {
+        "all": true
       },
       "dialog": {
         "all": true
       },
+      "process": {
+        "relaunch": true
+      },
       "shell": {
         "sidecar": true,
         "open": true,
+        "execute": true,
         "scope": [
           {
             "name": "../../app-executor/dist/app-executor",
+            "sidecar": true
+          },
+          {
+            "name": "npm",
+            "args": true,
+            "cmd": "npm",
+            "sidecar": false
+          },
+          {
+            "name": "../sidecars/pnpm/pnpm",
+            "args": true,
+            "cmd": "pnpm",
             "sidecar": true
           }
         ]
@@ -34,6 +53,10 @@
       },
       "globalShortcut": {
         "all": true
+      },
+      "http": {
+        "all": true,
+        "scope": ["https://*"]
       }
     },
     "bundle": {
@@ -43,7 +66,7 @@
       "deb": {
         "depends": []
       },
-      "externalBin": ["../../app-executor/dist/app-executor"],
+      "externalBin": ["../../app-executor/dist/app-executor", "../sidecars/pnpm/pnpm"],
       "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
       "identifier": "com.ironcladapp.rivet",
       "longDescription": "",
@@ -69,7 +92,7 @@
     "updater": {
       "active": true,
       "endpoints": ["https://github.com/Ironclad/rivet/releases/latest/download/latest.json"],
-      "dialog": true,
+      "dialog": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwRTgxNDEzODJDREJDNzkKUldSNXZNMkNFeFRvUU5VK0NXdEIwNlc3NTREUWpNSmpaeGFwWjFwc21ZT0U5cFlzcy81QndDOXYK"
     },
     "windows": [

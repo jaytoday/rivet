@@ -1,26 +1,53 @@
 import clsx from 'clsx';
-import { CSSProperties, FC, HTMLAttributes, MouseEvent, forwardRef, memo, useEffect, useState } from 'react';
-import { useRecoilValue } from 'recoil';
+import {
+  type CSSProperties,
+  type FC,
+  type HTMLAttributes,
+  type MouseEvent,
+  forwardRef,
+  memo,
+  useEffect,
+  useState,
+  useMemo,
+} from 'react';
+import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { match } from 'ts-pattern';
-import { ChartNode, CommentNode, NodeConnection, NodeId, PortId } from '@ironclad/rivet-core';
-import { lastRunData, selectedProcessPage } from '../state/dataFlow.js';
+import {
+  type NodeInputDefinition,
+  type ChartNode,
+  type CommentNode,
+  type NodeConnection,
+  type NodeId,
+  type PortId,
+  type NodeOutputDefinition,
+} from '@ironclad/rivet-core';
+import type { HeightCache } from '../hooks/useNodeBodyHeight';
+import { type ProcessDataForNode, lastRunData, selectedProcessPage } from '../state/dataFlow.js';
 import { NodeBody } from './NodeBody.js';
 import { NodeOutput } from './NodeOutput.js';
-import { ReactComponent as SettingsCogIcon } from 'majesticons/line/settings-cog-line.svg';
-import { ReactComponent as SendIcon } from 'majesticons/solid/send.svg';
-import { ReactComponent as GitForkLine } from 'majesticons/line/git-fork-line.svg';
+import SettingsCogIcon from 'majesticons/line/settings-cog-line.svg?react';
+import SendIcon from 'majesticons/solid/send.svg?react';
+import GitForkLine from 'majesticons/line/git-fork-line.svg?react';
+import PinIcon from 'majesticons/line/pin-line.svg?react';
+import PinSolidIcon from 'majesticons/solid/pin.svg?react';
 import { ResizeHandle } from './ResizeHandle.js';
 import { useCanvasPositioning } from '../hooks/useCanvasPositioning.js';
 import { useStableCallback } from '../hooks/useStableCallback.js';
 import { LoadingSpinner } from './LoadingSpinner.js';
 import { ErrorBoundary } from 'react-error-boundary';
-import { NodePorts, NodePortsRenderer } from './NodePorts.js';
-import { useNodeTypes } from '../hooks/useNodeTypes';
+import { NodePortsRenderer } from './NodePorts.js';
 import { useDependsOnPlugins } from '../hooks/useDependsOnPlugins';
-import { useIsKnownNodeType } from '../hooks/useIsKnownNodeType';
-import { draggingWireClosestPortState, draggingWireState } from '../state/graphBuilder';
+import {
+  type DraggingWireDef,
+  draggingWireClosestPortState,
+  draggingWireState,
+  isPinnedState,
+  pinnedNodesState,
+} from '../state/graphBuilder';
+import { Tooltip } from './Tooltip';
 
 export type VisualNodeProps = {
+  heightCache: HeightCache;
   node: ChartNode;
   connections?: NodeConnection[];
   xDelta?: number;
@@ -29,6 +56,12 @@ export type VisualNodeProps = {
   isOverlay?: boolean;
   isSelected?: boolean;
   scale?: number;
+  isKnownNodeType: boolean;
+  isPinned: boolean;
+  lastRun?: ProcessDataForNode[];
+  processPage: number | 'latest';
+  draggingWire?: DraggingWireDef;
+  isZoomedOut: boolean;
   onWireStartDrag?: (
     event: MouseEvent<HTMLElement>,
     startNodeId: NodeId,
@@ -41,6 +74,20 @@ export type VisualNodeProps = {
   onNodeSizeChanged?: (newWidth: number, newHeight: number) => void;
   onMouseOver?: (event: MouseEvent<HTMLElement>, nodeId: NodeId) => void;
   onMouseOut?: (event: MouseEvent<HTMLElement>, nodeId: NodeId) => void;
+  onPortMouseOver?: (
+    event: MouseEvent<HTMLElement>,
+    nodeId: NodeId,
+    isInput: boolean,
+    portId: PortId,
+    definition: NodeInputDefinition | NodeOutputDefinition,
+  ) => void;
+  onPortMouseOut?: (
+    event: MouseEvent<HTMLElement>,
+    nodeId: NodeId,
+    isInput: boolean,
+    portId: PortId,
+    definition: NodeInputDefinition | NodeOutputDefinition,
+  ) => void;
 
   nodeAttributes?: HTMLAttributes<HTMLDivElement>;
   handleAttributes?: HTMLAttributes<HTMLDivElement>;
@@ -50,6 +97,7 @@ export const VisualNode = memo(
   forwardRef<HTMLDivElement, VisualNodeProps>(
     (
       {
+        heightCache,
         node,
         connections = [],
         handleAttributes,
@@ -60,6 +108,11 @@ export const VisualNode = memo(
         isOverlay,
         scale,
         isSelected,
+        isKnownNodeType,
+        isPinned,
+        lastRun,
+        processPage,
+        isZoomedOut,
         onWireEndDrag,
         onWireStartDrag,
         onSelectNode,
@@ -67,25 +120,53 @@ export const VisualNode = memo(
         onNodeSizeChanged,
         onMouseOver,
         onMouseOut,
+        onPortMouseOver,
+        onPortMouseOut,
       },
       ref,
     ) => {
-      const lastRun = useRecoilValue(lastRunData(node.id));
-      const processPage = useRecoilValue(selectedProcessPage(node.id));
       const isComment = node.type === 'comment';
       useDependsOnPlugins();
 
-      const {
-        canvasPosition: { zoom },
-      } = useCanvasPositioning();
+      const asCommentNode = node as CommentNode;
+      const style = useMemo(() => {
+        const bgColor = node.visualData.color?.bg ?? 'var(--grey-darkish)';
+        const borderColor = node.visualData.color?.border ?? 'var(--grey-darkish)';
 
-      const style: CSSProperties = {
-        opacity: isDragging ? '0' : '',
-        transform: `translate(${node.visualData.x + xDelta}px, ${node.visualData.y + yDelta}px) scale(${scale ?? 1})`,
-        zIndex: isComment ? -10000 : node.visualData.zIndex ?? 0,
-        width: node.visualData.width,
-        height: isComment ? (node as CommentNode).data.height : undefined,
-      };
+        let fgColor = 'var(--foreground-bright)';
+        if (bgColor) {
+          const match = bgColor.match(/node-color-(\d+)/);
+          if (match?.[1]) {
+            fgColor = `var(--node-color-${match[1]}-foreground)`;
+          }
+        }
+
+        const style: CSSProperties = {
+          opacity: isDragging ? '0' : '',
+          transform: `translate(${node.visualData.x + xDelta}px, ${node.visualData.y + yDelta}px) scale(${scale ?? 1})`,
+          zIndex: isComment ? -10000 : node.visualData.zIndex ?? 0,
+          width: node.visualData.width,
+          height: isComment ? asCommentNode.data.height : undefined,
+          '--node-bg': bgColor,
+          '--node-border': borderColor,
+          '--node-bg-foreground': fgColor,
+        } as CSSProperties;
+
+        return style;
+      }, [
+        node.visualData.color?.bg,
+        node.visualData.color?.border,
+        node.visualData.x,
+        node.visualData.y,
+        xDelta,
+        yDelta,
+        node.visualData.width,
+        isDragging,
+        scale,
+        node.visualData.zIndex,
+        isComment,
+        asCommentNode.data.height,
+      ]);
 
       const nodeRef = (refValue: HTMLDivElement | null) => {
         if (typeof ref === 'function') {
@@ -95,7 +176,7 @@ export const VisualNode = memo(
         }
       };
 
-      const isZoomedOut = !isComment && zoom < 0.4;
+      // const isZoomedOut = !isComment && zoom < 0.4;
 
       const selectedProcessRun =
         lastRun && lastRun.length > 0
@@ -110,8 +191,11 @@ export const VisualNode = memo(
             success: selectedProcessRun?.status?.type === 'ok',
             error: selectedProcessRun?.status?.type === 'error',
             running: selectedProcessRun?.status?.type === 'running',
+            'not-ran': selectedProcessRun?.status?.type === 'notRan',
             zoomedOut: isZoomedOut,
             isComment,
+            isPinned,
+            disabled: node.disabled,
           })}
           ref={nodeRef}
           style={style}
@@ -120,6 +204,11 @@ export const VisualNode = memo(
           data-contextmenutype={`node-${node.type}`}
           onMouseOver={(event) => onMouseOver?.(event, node.id)}
           onMouseOut={(event) => onMouseOut?.(event, node.id)}
+          onDoubleClick={() => {
+            if (isKnownNodeType) {
+              onStartEditing?.();
+            }
+          }}
         >
           {isZoomedOut ? (
             <ZoomedOutVisualNodeContent
@@ -128,9 +217,15 @@ export const VisualNode = memo(
               handleAttributes={handleAttributes}
               onSelectNode={onSelectNode}
               onStartEditing={onStartEditing}
+              onPortMouseOver={onPortMouseOver}
+              onPortMouseOut={onPortMouseOut}
+              isKnownNodeType={isKnownNodeType}
+              lastRun={lastRun}
+              processPage={processPage}
             />
           ) : (
             <NormalVisualNodeContent
+              heightCache={heightCache}
               node={node}
               connections={connections}
               onWireStartDrag={onWireStartDrag}
@@ -139,6 +234,12 @@ export const VisualNode = memo(
               onStartEditing={onStartEditing}
               onNodeSizeChanged={onNodeSizeChanged}
               handleAttributes={handleAttributes}
+              onPortMouseOver={onPortMouseOver}
+              onPortMouseOut={onPortMouseOut}
+              isKnownNodeType={isKnownNodeType}
+              lastRun={lastRun}
+              processPage={processPage}
+              isPinned={isPinned}
             />
           )}
         </div>
@@ -151,14 +252,42 @@ const ZoomedOutVisualNodeContent: FC<{
   node: ChartNode;
   connections?: NodeConnection[];
   handleAttributes?: HTMLAttributes<HTMLDivElement>;
+  isKnownNodeType: boolean;
+  lastRun?: ProcessDataForNode[];
+  processPage: number | 'latest';
   onSelectNode?: (multi: boolean) => void;
   onStartEditing?: () => void;
   onWireStartDrag?: (event: MouseEvent<HTMLElement>, startNodeId: NodeId, startPortId: PortId) => void;
   onWireEndDrag?: (event: MouseEvent<HTMLElement>, endNodeId: NodeId, endPortId: PortId) => void;
+  onPortMouseOver?: (
+    event: MouseEvent<HTMLElement>,
+    nodeId: NodeId,
+    isInput: boolean,
+    portId: PortId,
+    definition: NodeInputDefinition | NodeOutputDefinition,
+  ) => void;
+  onPortMouseOut?: (
+    event: MouseEvent<HTMLElement>,
+    nodeId: NodeId,
+    isInput: boolean,
+    portId: PortId,
+    definition: NodeInputDefinition | NodeOutputDefinition,
+  ) => void;
 }> = memo(
-  ({ node, connections = [], handleAttributes, onSelectNode, onStartEditing, onWireStartDrag, onWireEndDrag }) => {
-    const lastRun = useRecoilValue(lastRunData(node.id));
-    const processPage = useRecoilValue(selectedProcessPage(node.id));
+  ({
+    node,
+    connections = [],
+    handleAttributes,
+    isKnownNodeType,
+    lastRun,
+    processPage,
+    onSelectNode,
+    onStartEditing,
+    onWireStartDrag,
+    onWireEndDrag,
+    onPortMouseOver,
+    onPortMouseOut,
+  }) => {
     useDependsOnPlugins();
 
     const handleEditClick = useStableCallback((event: MouseEvent<HTMLButtonElement>) => {
@@ -183,7 +312,6 @@ const ZoomedOutVisualNodeContent: FC<{
 
     const draggingWire = useRecoilValue(draggingWireState);
     const closestPortToDraggingWire = useRecoilValue(draggingWireClosestPortState);
-    const isKnownNodeType = useIsKnownNodeType(node.type);
 
     return (
       <>
@@ -216,6 +344,11 @@ const ZoomedOutVisualNodeContent: FC<{
                       <SendIcon />
                     </div>
                   ))
+                  .with({ type: 'notRan' }, () => (
+                    <div className="not-ran">
+                      <SendIcon />
+                    </div>
+                  ))
                   .exhaustive()
               ) : (
                 <></>
@@ -236,6 +369,8 @@ const ZoomedOutVisualNodeContent: FC<{
             onWireEndDrag={onWireEndDrag}
             draggingWire={draggingWire}
             closestPortToDraggingWire={closestPortToDraggingWire}
+            onPortMouseOver={onPortMouseOver}
+            onPortMouseOut={onPortMouseOut}
           />
         )}
       </>
@@ -243,10 +378,17 @@ const ZoomedOutVisualNodeContent: FC<{
   },
 );
 
+ZoomedOutVisualNodeContent.displayName = 'ZoomedOutVisualNodeContent';
+
 const NormalVisualNodeContent: FC<{
+  heightCache: HeightCache;
   node: ChartNode;
   connections?: NodeConnection[];
   handleAttributes?: HTMLAttributes<HTMLDivElement>;
+  isKnownNodeType: boolean;
+  lastRun?: ProcessDataForNode[];
+  processPage: number | 'latest';
+  isPinned: boolean;
   onWireStartDrag?: (
     event: MouseEvent<HTMLElement>,
     startNodeId: NodeId,
@@ -257,20 +399,38 @@ const NormalVisualNodeContent: FC<{
   onSelectNode?: (multi: boolean) => void;
   onStartEditing?: () => void;
   onNodeSizeChanged?: (newWidth: number, newHeight: number) => void;
+  onPortMouseOver?: (
+    event: MouseEvent<HTMLElement>,
+    nodeId: NodeId,
+    isInput: boolean,
+    portId: PortId,
+    definition: NodeInputDefinition | NodeOutputDefinition,
+  ) => void;
+  onPortMouseOut?: (
+    event: MouseEvent<HTMLElement>,
+    nodeId: NodeId,
+    isInput: boolean,
+    portId: PortId,
+    definition: NodeInputDefinition | NodeOutputDefinition,
+  ) => void;
 }> = memo(
   ({
+    heightCache,
     node,
     connections = [],
+    lastRun,
+    processPage,
+    isPinned,
     onWireStartDrag,
     onWireEndDrag,
     onSelectNode,
     onStartEditing,
     onNodeSizeChanged,
     handleAttributes,
+    onPortMouseOver,
+    onPortMouseOut,
+    isKnownNodeType,
   }) => {
-    const isComment = node.type === 'comment';
-    const lastRun = useRecoilValue(lastRunData(node.id));
-    const processPage = useRecoilValue(selectedProcessPage(node.id));
     useDependsOnPlugins();
 
     const [initialHeight, setInitialHeight] = useState<number | undefined>();
@@ -346,7 +506,9 @@ const NormalVisualNodeContent: FC<{
     const [shiftHeld, setShiftHeld] = useState(false);
 
     const watchShift = useStableCallback((event: MouseEvent) => {
-      setShiftHeld(event.shiftKey);
+      if (event.shiftKey !== shiftHeld) {
+        setShiftHeld(event.shiftKey);
+      }
     });
 
     const handleAttributesMaybe = shiftHeld ? {} : handleAttributes;
@@ -356,11 +518,20 @@ const NormalVisualNodeContent: FC<{
       onSelectNode?.(event.shiftKey);
     });
 
-    const isKnownNodeType = useIsKnownNodeType(node.type);
-
-    const { canvasPosition } = useCanvasPositioning();
     const draggingWire = useRecoilValue(draggingWireState);
     const closestPortToDraggingWire = useRecoilValue(draggingWireClosestPortState);
+
+    const setPinnedNodes = useSetRecoilState(pinnedNodesState);
+
+    const togglePinned = useStableCallback(() => {
+      setPinnedNodes((prev) => {
+        if (prev.includes(node.id)) {
+          return prev.filter((n) => n !== node.id);
+        } else {
+          return [...prev, node.id];
+        }
+      });
+    });
 
     return (
       <>
@@ -374,42 +545,72 @@ const NormalVisualNodeContent: FC<{
             <div className="title-text">{node.title}</div>
           </div>
           <div className="title-controls">
+            <button className={clsx('pin-button', { pinned: isPinned })} onClick={togglePinned}>
+              <Tooltip content="Pin node (always show entire output)">
+                {isPinned ? <PinSolidIcon /> : <PinIcon />}
+              </Tooltip>
+            </button>
             <div className="last-run-status">
               {selectedProcessRun?.status ? (
                 match(selectedProcessRun.status)
                   .with({ type: 'ok' }, () => (
-                    <div className="success">
-                      <SendIcon />
-                    </div>
+                    <Tooltip content="This node ran successfully">
+                      <div className="success">
+                        <SendIcon />
+                      </div>
+                    </Tooltip>
                   ))
                   .with({ type: 'error' }, () => (
-                    <div className="error">
-                      <SendIcon />
-                    </div>
+                    <Tooltip content="This node errored">
+                      <div className="error">
+                        <SendIcon />
+                      </div>
+                    </Tooltip>
                   ))
                   .with({ type: 'running' }, () => (
-                    <div className="running">
-                      <LoadingSpinner />
-                    </div>
+                    <Tooltip content="This node is currently running">
+                      <div className="running">
+                        <LoadingSpinner />
+                      </div>
+                    </Tooltip>
                   ))
                   .with({ type: 'interrupted' }, () => (
-                    <div className="interrupted">
-                      <SendIcon />
-                    </div>
+                    <Tooltip content="This node was interrupted">
+                      <div className="interrupted">
+                        <SendIcon />
+                      </div>
+                    </Tooltip>
+                  ))
+                  .with({ type: 'notRan' }, () => (
+                    <Tooltip content="This node was not ran due to control flow">
+                      <div className="not-ran">
+                        <SendIcon />
+                      </div>
+                    </Tooltip>
                   ))
                   .exhaustive()
               ) : (
                 <></>
               )}
             </div>
-            <button className="edit-button" onClick={handleEditClick} onMouseDown={handleEditMouseDown} title="Edit">
-              <SettingsCogIcon />
-            </button>
+            <Tooltip content="Edit Node">
+              <button
+                className="edit-button"
+                onClick={(e) => {
+                  if (isKnownNodeType) {
+                    handleEditClick(e);
+                  }
+                }}
+                onMouseDown={handleEditMouseDown}
+              >
+                <SettingsCogIcon />
+              </button>
+            </Tooltip>
           </div>
         </div>
         <ErrorBoundary fallback={<div>Error rendering node body</div>}>
           {isKnownNodeType ? (
-            <NodeBody node={node} />
+            <NodeBody heightCache={heightCache} node={node} />
           ) : (
             <div>Unknown node type {node.type} - are you missing a plugin?</div>
           )}
@@ -423,6 +624,8 @@ const NormalVisualNodeContent: FC<{
             onWireEndDrag={onWireEndDrag}
             draggingWire={draggingWire}
             closestPortToDraggingWire={closestPortToDraggingWire}
+            onPortMouseOver={onPortMouseOver}
+            onPortMouseOut={onPortMouseOut}
           />
         )}
 
@@ -436,3 +639,5 @@ const NormalVisualNodeContent: FC<{
     );
   },
 );
+
+NormalVisualNodeContent.displayName = 'NormalVisualNodeContent';

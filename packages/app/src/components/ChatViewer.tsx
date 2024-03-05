@@ -1,25 +1,30 @@
-import { FC, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useRecoilState, useRecoilValue } from 'recoil';
 import { orderBy } from 'lodash-es';
 import { overlayOpenState } from '../state/ui';
 import { css } from '@emotion/react';
 import clsx from 'clsx';
 import {
-  BuiltInNodes,
-  ChartNode,
-  DataValue,
-  NodeId,
-  PortId,
-  ProcessId,
-  ScalarOrArrayDataValue,
+  type BuiltInNodes,
+  type ChartNode,
+  type DataValue,
+  type NodeId,
+  type PortId,
+  type ProcessId,
+  type ScalarOrArrayDataValue,
   arrayizeDataValue,
   coerceTypeOptional,
 } from '@ironclad/rivet-core';
-import { NodeRunData, lastRunDataByNodeState } from '../state/dataFlow';
+import { type NodeRunData, lastRunDataByNodeState, graphRunningState } from '../state/dataFlow';
 import { projectState } from '../state/savedGraphs';
 import { ErrorBoundary } from 'react-error-boundary';
 import TextField from '@atlaskit/textfield';
 import { useGoToNode } from '../hooks/useGoToNode';
+import MaximizeIcon from 'majesticons/line/maximize-line.svg?react';
+import MinimizeIcon from 'majesticons/line/minimize-line.svg?react';
+import { useToggle } from 'ahooks';
+import { FixedSizeList } from 'react-window';
+import { useCurrentExecution } from '../hooks/useCurrentExecution';
 
 export const ChatViewerRenderer: FC = () => {
   const [openOverlay, setOpenOverlay] = useRecoilState(overlayOpenState);
@@ -35,12 +40,12 @@ export const ChatViewerRenderer: FC = () => {
 
 const styles = css`
   position: fixed;
-  top: 0;
+  top: var(--project-selector-height);
   left: 0;
   right: 0;
   bottom: 0;
   background-color: var(--grey-darker);
-  z-index: 60;
+  z-index: 150;
   overflow: auto;
 
   .controls-filters {
@@ -57,12 +62,22 @@ const styles = css`
     padding: 0 48px;
     display: flex;
     flex-direction: column;
-    gap: 32px;
+    column-gap: 32px;
+    row-gap: 16px;
 
     section {
       display: flex;
       flex-wrap: wrap;
-      gap: 32px;
+
+      column-gap: 32px;
+      row-gap: 16px;
+    }
+
+    section.completed-chats {
+    }
+
+    section.in-progress-chats {
+      min-height: 550px;
     }
   }
 
@@ -73,14 +88,34 @@ const styles = css`
     border-radius: 10px;
     box-shadow: 0 0 10px var(--shadow-primary-bright);
 
-    &.complete {
-      border: 1px solid var(--success);
+    &.complete,
+    &.error {
+      border: 0;
       box-shadow: none;
+      width: 100%;
+
+      &:not(.expanded) .prompt {
+        max-height: 0;
+        padding: 0;
+      }
+
+      &:not(.expanded) .response {
+        height: 100px;
+        overflow: hidden;
+      }
+
+      &:not(.expanded) .line {
+        display: none;
+      }
     }
 
     &.error {
       border: 1px solid var(--error);
       box-shadow: none;
+    }
+
+    &.complete header {
+      border-bottom: 1px solid var(--success);
     }
 
     header {
@@ -92,7 +127,8 @@ const styles = css`
       align-items: center;
       justify-content: space-between;
 
-      .graph-name {
+      .graph-name,
+      .node-title {
         color: var(--primary-text);
       }
 
@@ -107,6 +143,29 @@ const styles = css`
 
         &:hover {
           color: var(--primary-text);
+        }
+      }
+
+      .buttons {
+        display: flex;
+        align-items: center;
+        column-gap: 8px;
+
+        .expand {
+          border: 0;
+          margin: 0;
+          padding: 0;
+          width: 32px;
+          height: 32px;
+          background-color: transparent;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+
+          &:hover {
+            background-color: var(--grey-dark);
+          }
         }
       }
     }
@@ -126,12 +185,8 @@ const styles = css`
     .response {
       padding: 15px;
       white-space: pre-wrap;
-      height: 500px;
+      height: 400px;
       overflow: auto;
-    }
-
-    &.complete .response {
-      max-height: 200px;
     }
   }
 `;
@@ -143,6 +198,7 @@ export const ChatViewer: FC<{
   const allLastRunData = useRecoilValue(lastRunDataByNodeState);
   const [graphFilter, setGraphFilter] = useState('');
   const goToNode = useGoToNode();
+  const graphRunning = useRecoilValue(graphRunningState);
 
   const nodesToGraphNameMap = useMemo(() => {
     const map: Record<NodeId, string> = {};
@@ -205,6 +261,24 @@ export const ChatViewer: FC<{
     onClose();
   };
 
+  const CompletedRow = ({ index, style }: { index: number; style: any }) => {
+    const { node, process, index: processIndex } = completedProcesses[index]!;
+    const graphName = nodesToGraphNameMap[node.id]!;
+    return (
+      <ChatBubble
+        style={style}
+        nodeId={node.id}
+        nodeTitle={node.title}
+        processId={process.processId}
+        data={process.data}
+        key={`${node.id}-${process.processId}-${index}`}
+        graphName={graphName}
+        onGoToNode={doGoToNode}
+        splitIndex={processIndex}
+      />
+    );
+  };
+
   return (
     <div css={styles}>
       <div className="controls-filters">
@@ -215,37 +289,30 @@ export const ChatViewer: FC<{
         />
       </div>
       <div className="chats">
-        <section>
-          {runningProcesses.map(({ node, process, index }) => {
-            const graphName = nodesToGraphNameMap[node.id]!;
-            return (
-              <ChatBubble
-                nodeId={node.id}
-                processId={process.processId}
-                data={process.data}
-                key={`${node.id}-${process.processId}`}
-                graphName={graphName}
-                onGoToNode={doGoToNode}
-                splitIndex={index}
-              />
-            );
-          })}
-        </section>
-        <section>
-          {completedProcesses.map(({ node, process, index }) => {
-            const graphName = nodesToGraphNameMap[node.id]!;
-            return (
-              <ChatBubble
-                nodeId={node.id}
-                processId={process.processId}
-                data={process.data}
-                key={`${node.id}-${process.processId}`}
-                graphName={graphName}
-                onGoToNode={doGoToNode}
-                splitIndex={index}
-              />
-            );
-          })}
+        {graphRunning && (
+          <section className="in-progress-chats">
+            {runningProcesses.map(({ node, process, index }) => {
+              const graphName = nodesToGraphNameMap[node.id]!;
+              return (
+                <ChatBubble
+                  nodeId={node.id}
+                  nodeTitle={node.title}
+                  processId={process.processId}
+                  data={process.data}
+                  key={`${node.id}-${process.processId}-${index}`}
+                  graphName={graphName}
+                  onGoToNode={doGoToNode}
+                  splitIndex={index}
+                />
+              );
+            })}
+          </section>
+        )}
+
+        <section className="completed-chats">
+          <FixedSizeList height={window.innerHeight} width="100%" itemCount={completedProcesses.length} itemSize={150}>
+            {CompletedRow}
+          </FixedSizeList>
         </section>
       </div>
     </div>
@@ -255,13 +322,16 @@ export const ChatViewer: FC<{
 const ChatBubble: FC<{
   graphName: string;
   nodeId: NodeId;
+  nodeTitle: string;
   processId: ProcessId;
   data: NodeRunData;
   splitIndex: number;
+  style?: CSSProperties;
   onGoToNode?: (nodeId: NodeId) => void;
-}> = ({ nodeId, splitIndex, data, graphName, onGoToNode }) => {
+}> = ({ nodeId, nodeTitle, splitIndex, data, graphName, style, onGoToNode }) => {
   const promptRef = useRef<HTMLDivElement>(null);
   const responseRef = useRef<HTMLDivElement>(null);
+  const [expanded, toggleExpanded] = useToggle();
 
   let prompt: DataValue;
 
@@ -286,15 +356,23 @@ const ChatBubble: FC<{
 
   useLayoutEffect(() => {
     if (promptRef.current) {
-      promptRef.current.scrollTop = promptRef.current.scrollHeight;
+      if (data.status?.type === 'ok') {
+        promptRef.current.scrollTop = 0;
+      } else {
+        promptRef.current.scrollTop = promptRef.current.scrollHeight;
+      }
     }
-  }, [promptText]);
+  }, [promptText, data.status?.type]);
 
   useLayoutEffect(() => {
     if (responseRef.current) {
-      responseRef.current.scrollTop = responseRef.current.scrollHeight;
+      if (data.status?.type === 'ok') {
+        responseRef.current.scrollTop = 0;
+      } else {
+        responseRef.current.scrollTop = responseRef.current.scrollHeight;
+      }
     }
-  }, [responseText]);
+  }, [responseText, data.status?.type]);
 
   if (!chatOutput) {
     return null;
@@ -305,19 +383,28 @@ const ChatBubble: FC<{
       className={clsx('chat-bubble', {
         complete: data.status?.type === 'ok',
         error: data.status?.type === 'error',
+        expanded,
       })}
+      style={style}
     >
       <header>
         <span>
-          In: <span className="graph-name">{graphName}</span>
+          <span className="node-title">{nodeTitle}</span> in <span className="graph-name">{graphName}</span>
         </span>
-        <button className="go-to-node" onClick={() => onGoToNode?.(nodeId)}>
-          Go To
-        </button>
+        <div className="buttons">
+          <button className="go-to-node" onClick={() => onGoToNode?.(nodeId)}>
+            Go To
+          </button>
+          <button className="expand" onClick={toggleExpanded.toggle}>
+            {expanded ? <MinimizeIcon /> : <MaximizeIcon />}
+          </button>
+        </div>
       </header>
-      <div className="prompt" ref={promptRef}>
-        {promptText}
-      </div>
+      {expanded || data.status?.type !== 'ok' ? (
+        <div className="prompt" ref={promptRef}>
+          {promptText}
+        </div>
+      ) : null}
       <div className="line" />
       <div className="response" ref={responseRef}>
         {responseText}

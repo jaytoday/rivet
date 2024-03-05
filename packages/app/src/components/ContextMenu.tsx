@@ -1,13 +1,13 @@
 import { css } from '@emotion/react';
 import styled from '@emotion/styled';
-import { FC, forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { CSSTransition } from 'react-transition-group';
 import { useStableCallback } from '../hooks/useStableCallback.js';
 import { useFloating, useMergeRefs, autoUpdate, shift, flip } from '@floating-ui/react';
 import {
-  ContextMenuConfiguration,
+  type ContextMenuConfiguration,
   useContextMenuConfiguration,
-  ContextMenuItem as ContextMenuConfigItem,
+  type ContextMenuItem as ContextMenuConfigItem,
 } from '../hooks/useContextMenuConfiguration';
 import { useFuseSearch } from '../hooks/useFuseSearch.js';
 import { uniqBy } from 'lodash-es';
@@ -106,10 +106,13 @@ export const ContextMenu = forwardRef<HTMLDivElement, ContextMenuProps>(
         items: readonly ContextMenuConfigItem[],
         path: string[] = [],
       ): (ContextMenuConfigItem & { path: string[] })[] => {
-        const allItems = items.reduce((acc, item) => {
-          const newPath = [...path, item.label];
-          return acc.concat({ ...item, path: newPath }, ...flattenItems(item.items || [], newPath));
-        }, [] as (ContextMenuConfigItem & { path: string[] })[]);
+        const allItems = items.reduce(
+          (acc, item) => {
+            const newPath = [...path, item.label];
+            return acc.concat({ ...item, path: newPath }, ...flattenItems(item.items || [], newPath));
+          },
+          [] as (ContextMenuConfigItem & { path: string[] })[],
+        );
 
         const onlyLeaves = allItems.filter((item) => !item.items?.length);
 
@@ -187,6 +190,8 @@ export const ContextMenu = forwardRef<HTMLDivElement, ContextMenuProps>(
         <div style={floatingStyles} css={menuStyles} ref={refs.setFloating}>
           <div className="context-menu-search">
             <input
+              autoComplete="off"
+              spellCheck={false}
               ref={searchRef}
               autoFocus
               placeholder="Search..."
@@ -213,6 +218,8 @@ export const ContextMenu = forwardRef<HTMLDivElement, ContextMenuProps>(
     );
   },
 );
+
+ContextMenu.displayName = 'ContextMenu';
 
 export const submenuStyles = css`
   position: absolute;
@@ -277,7 +284,9 @@ export const ContextMenuItemDiv = styled.div<{ hasSubmenu?: boolean }>`
   padding: 8px 12px;
   border-radius: 4px;
   white-space: nowrap;
-  transition: background-color 0.1s ease-out, color 0.1s ease-out;
+  transition:
+    background-color 0.1s ease-out,
+    color 0.1s ease-out;
 
   .label {
     display: flex;

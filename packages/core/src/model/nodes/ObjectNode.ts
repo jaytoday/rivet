@@ -1,9 +1,17 @@
-import { ChartNode, NodeConnection, NodeId, NodeInputDefinition, NodeOutputDefinition, PortId } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { DataValue } from '../DataValue.js';
+import {
+  type ChartNode,
+  type NodeConnection,
+  type NodeId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+  type PortId,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type DataValue } from '../DataValue.js';
 import { dedent } from 'ts-dedent';
-import { EditorDefinition } from '../EditorDefinition.js';
+import { type EditorDefinition } from '../EditorDefinition.js';
 
 export type ObjectNode = ChartNode<'object', ObjectNodeData>;
 
@@ -53,7 +61,7 @@ export class ObjectNodeImpl extends NodeImpl<ObjectNode> {
   getOutputDefinitions(): NodeOutputDefinition[] {
     return [
       {
-        dataType: 'object',
+        dataType: ['object', 'object[]'],
         id: 'output' as PortId,
         title: 'Output',
       },
@@ -108,15 +116,27 @@ export class ObjectNodeImpl extends NodeImpl<ObjectNode> {
   }
 
   async process(inputs: Record<string, DataValue>): Promise<Record<string, DataValue>> {
-    const inputMap = Object.keys(inputs).reduce((acc, key) => {
-      acc[key] = (inputs[key] as any)?.value;
-      return acc;
-    }, {} as Record<string, any>);
+    const inputMap = Object.keys(inputs).reduce(
+      (acc, key) => {
+        acc[key] = (inputs[key] as any)?.value;
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
 
     const outputValue = JSON.parse(this.interpolate(this.chartNode.data.jsonTemplate, inputMap)) as Record<
       string,
       unknown
     >;
+
+    if (Array.isArray(outputValue)) {
+      return {
+        output: {
+          type: 'object[]',
+          value: outputValue,
+        },
+      };
+    }
 
     return {
       output: {

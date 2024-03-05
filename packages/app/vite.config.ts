@@ -3,9 +3,10 @@ import react from '@vitejs/plugin-react';
 import viteTsconfigPaths from 'vite-tsconfig-paths';
 import svgr from 'vite-plugin-svgr';
 import monacoEditorPlugin from 'vite-plugin-monaco-editor';
-import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
+import { visualizer } from 'rollup-plugin-visualizer';
+import { splitVendorChunkPlugin } from 'vite';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -22,6 +23,16 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 10000,
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (id.includes('gpt-tokenizer')) {
+            return 'gpt-tokenizer';
+          }
+        },
+      },
+      plugins: [visualizer()],
+    },
   },
   plugins: [
     react(),
@@ -33,7 +44,7 @@ export default defineConfig({
     }),
     // Bad ESM
     (monacoEditorPlugin as any).default({}),
-    wasm(),
     topLevelAwait(),
+    splitVendorChunkPlugin(),
   ],
 });

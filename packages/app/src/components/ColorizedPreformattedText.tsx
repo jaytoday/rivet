@@ -1,4 +1,4 @@
-import { FC, useLayoutEffect, useRef } from 'react';
+import { type FC, useLayoutEffect, useRef } from 'react';
 import { monaco } from '../utils/monaco';
 import { useRecoilValue } from 'recoil';
 import { themeState } from '../state/settings';
@@ -16,7 +16,7 @@ export const ColorizedPreformattedText: FC<{ text: string; language: string; the
     monaco.editor.colorizeElement(bodyRef.current!, {
       theme: actualTheme ?? 'vs-dark',
     });
-  }, [text, theme]);
+  }, [text, actualTheme]);
 
   return (
     <pre ref={bodyRef} data-lang={language}>

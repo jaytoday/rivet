@@ -2,12 +2,7 @@ import { cp } from 'node:fs/promises';
 import { execaCommand } from 'execa';
 import chalk from 'chalk';
 import * as esbuild from 'esbuild';
-import { copy } from 'esbuild-plugin-copy';
-import { dirname, join, resolve } from 'node:path';
-
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
+import { resolve } from 'node:path';
 
 const resolveRivet: esbuild.Plugin = {
   name: 'resolve-rivet',
@@ -21,40 +16,40 @@ const resolveRivet: esbuild.Plugin = {
   },
 };
 
-console.log(`Bundling to ${chalk.cyan('bin/executor-bundle.js')}...`);
+console.log(`Bundling to ${chalk.cyan('bin/executor-bundle.cjs')}...`);
 
 esbuild.build({
-  entryPoints: ['bin/executor.ts'],
+  entryPoints: ['bin/executor.mts'],
   bundle: true,
   platform: 'node',
-  outfile: './bin/executor-bundle.js',
+  outfile: './bin/executor-bundle.cjs',
   format: 'cjs',
   target: 'node16',
   external: [],
-  plugins: [
-    resolveRivet,
-    copy({
-      assets: [
-        {
-          from: join(dirname(require.resolve('@dqbd/tiktoken')), 'tiktoken_bg.wasm'),
-          to: './tiktoken_bg.wasm',
-        },
-      ],
-    }),
-  ],
+  plugins: [resolveRivet],
 });
 
 console.log(`Compiling to native binary for ${chalk.cyan(process.platform)}...`);
+
+const { platform } = process;
+
+if (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32') {
+  console.error(`Unsupported platform ${platform}.`);
+  process.exit(1);
+}
 
 const target = {
   darwin: 'node18-macos-x64',
   linux: 'node18-linux-x64',
   win32: 'node18-win-x64',
-}[process.platform];
+}[platform];
 
-await execaCommand(`yarn pkg . --out-path dist --targets ${target}`, {
-  stdio: 'inherit',
-});
+await execaCommand(
+  `yarn pkg . --out-path dist --no-bytecode --options experimental-network-imports --targets ${target}`,
+  {
+    stdio: 'inherit',
+  },
+);
 
 let { from: sourceFrom, to } = {
   darwin: {
@@ -71,9 +66,9 @@ let { from: sourceFrom, to } = {
   },
   win32: {
     from: 'dist/rivet-app-executor.exe',
-    to: undefined,
+    to: ['dist/app-executor-x86_64-pc-windows-msvc.exe'],
   },
-}[process.platform];
+}[platform];
 
 const { stdout } = await execaCommand('rustc -Vv');
 const host = stdout

@@ -10,12 +10,12 @@ export interface Settings<PluginSettings = Record<string, Record<string, unknown
   };
 
   // TODO move to openai plugin
-  openAiKey: string;
+  openAiKey?: string;
   openAiOrganization?: string;
+  openAiEndpoint?: string;
 
-  // pineconeApiKey?: string;
-  // anthropicApiKey?: string;
-  // assemblyAiApiKey?: string;
+  /** Timeout in milliseconds before retrying a chat node call. */
+  chatNodeTimeout?: number;
 
-  //
+  chatNodeHeaders?: Record<string, string>;
 }

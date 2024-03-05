@@ -1,4 +1,4 @@
-import { BuiltInNodeType } from '@ironclad/rivet-core';
+import { type BuiltInNodeType } from '@ironclad/rivet-core';
 
 import textNodeImage from '../assets/node_images/text_node.png';
 import chatNodeImage from '../assets/node_images/chat_node.png';
@@ -48,6 +48,28 @@ import userInputNodeImage from '../assets/node_images/user_input_node.png';
 import vectorKnnNodeImage from '../assets/node_images/vector_knn_node.png';
 import vectorStoreNodeImage from '../assets/node_images/vector_store_node.png';
 import waitForEventNodeImage from '../assets/node_images/wait_for_event_node.png';
+import delayNodeImage from '../assets/node_images/delay_node.png';
+import commentNodeImage from '../assets/node_images/comment_node.png';
+import objectNodeImage from '../assets/node_images/object_node.png';
+import audioNodeImage from '../assets/node_images/audio_node.png';
+import imageNodeImage from '../assets/node_images/image_node.png';
+import httpCallNodeImage from '../assets/node_images/http_call_node.png';
+import appendToDatasetNodeImage from '../assets/node_images/append_to_dataset_node.png';
+import createDatasetNodeImage from '../assets/node_images/create_dataset_node.png';
+import datasetNearestNeighborsNodeImage from '../assets/node_images/dataset_nearest_neighbors_node.png';
+import getAllDatasetsNodeImage from '../assets/node_images/get_all_datasets_node.png';
+import loadDatasetNodeImage from '../assets/node_images/load_dataset_node.png';
+import splitNodeImage from '../assets/node_images/split_node.png';
+import getDatasetRowNodeImage from '../assets/node_images/get_dataset_row_node.png';
+import sliceNodeImage from '../assets/node_images/slice_node.png';
+import extractMarkdownCodeBlocksImage from '../assets/node_images/extract_markdown_code_blocks_node.png';
+import assembleMessageNodeImage from '../assets/node_images/assemble_message_node.png';
+import urlReferenceNodeImage from '../assets/node_images/url_reference_node.png';
+import destructureNodeImage from '../assets/node_images/destructure_node.png';
+import replaceDatasetNodeImage from '../assets/node_images/replace_dataset_node.png';
+import listGraphsNodeImage from '../assets/node_images/list_graphs_node.png';
+import graphReferenceNodeImage from '../assets/node_images/graph_reference_node.png';
+import callGraphNodeImage from '../assets/node_images/call_graph_node.png';
 
 export const useBuiltInNodeImages = (): Record<BuiltInNodeType, string> => {
   return {
@@ -99,11 +121,27 @@ export const useBuiltInNodeImages = (): Record<BuiltInNodeType, string> => {
     vectorNearestNeighbors: vectorKnnNodeImage,
     vectorStore: vectorStoreNodeImage,
     waitForEvent: waitForEventNodeImage,
-
-    // TODO
-    comment: '',
-    object: '',
-    audio: '',
-    image: '',
+    delay: delayNodeImage,
+    comment: commentNodeImage,
+    object: objectNodeImage,
+    audio: audioNodeImage,
+    image: imageNodeImage,
+    httpCall: httpCallNodeImage,
+    appendToDataset: appendToDatasetNodeImage,
+    createDataset: createDatasetNodeImage,
+    datasetNearestNeighbors: datasetNearestNeighborsNodeImage,
+    getAllDatasets: getAllDatasetsNodeImage,
+    loadDataset: loadDatasetNodeImage,
+    split: splitNodeImage,
+    getDatasetRow: getDatasetRowNodeImage,
+    slice: sliceNodeImage,
+    extractMarkdownCodeBlocks: extractMarkdownCodeBlocksImage,
+    assembleMessage: assembleMessageNodeImage,
+    urlReference: urlReferenceNodeImage,
+    destructure: destructureNodeImage,
+    replaceDataset: replaceDatasetNodeImage,
+    listGraphs: listGraphsNodeImage,
+    graphReference: graphReferenceNodeImage,
+    callGraph: callGraphNodeImage,
   };
 };

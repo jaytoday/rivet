@@ -1,22 +1,24 @@
-import { FC, useMemo } from 'react';
+import { type FC } from 'react';
 import { css } from '@emotion/react';
 import { RenderDataValue } from '../RenderDataValue.js';
-import { ChatNode, Outputs, PortId, coerceTypeOptional, inferType, isArrayDataValue } from '@ironclad/rivet-core';
-import { NodeComponentDescriptor } from '../../hooks/useNodeTypes.js';
+import {
+  type ChatNode,
+  type Outputs,
+  type PortId,
+  coerceTypeOptional,
+  inferType,
+  isArrayDataValue,
+} from '@ironclad/rivet-core';
+import { type NodeComponentDescriptor } from '../../hooks/useNodeTypes.js';
 import styled from '@emotion/styled';
-import Toggle from '@atlaskit/toggle';
-import { marked } from 'marked';
 import clsx from 'clsx';
 import { useMarkdown } from '../../hooks/useMarkdown.js';
-
-type ChatNodeBodyProps = {
-  node: ChatNode;
-};
 
 const bodyStyles = css`
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow: hidden;
 
   &.multi-message {
     display: flex;
@@ -24,34 +26,6 @@ const bodyStyles = css`
     gap: 8px;
   }
 `;
-
-export const ChatNodeBody: FC<ChatNodeBodyProps> = ({ node }) => {
-  return (
-    <div css={bodyStyles}>
-      <div>{node.data.useMaxTokensInput ? 'Max Tokens: (Using Input)' : node.data.maxTokens} tokens</div>
-      <div>{node.data.useModelInput ? 'Model: (Using Input)' : node.data.model}</div>
-      <div>
-        {node.data.useTopP ? 'Top P' : 'Temperature'}:{' '}
-        {node.data.useTopP
-          ? node.data.useTopPInput
-            ? '(Using Input)'
-            : node.data.top_p
-          : node.data.useTemperatureInput
-          ? '(Using Input)'
-          : node.data.temperature}
-      </div>
-      {node.data.useStop && <div>Stop: {node.data.useStopInput ? '(Using Input)' : node.data.stop}</div>}
-      {(node.data.frequencyPenalty ?? 0) !== 0 && (
-        <div>
-          Frequency Penalty: {node.data.useFrequencyPenaltyInput ? '(Using Input)' : node.data.frequencyPenalty}
-        </div>
-      )}
-      {(node.data.presencePenalty ?? 0) !== 0 && (
-        <div>Presence Penalty: {node.data.usePresencePenaltyInput ? '(Using Input)' : node.data.presencePenalty}</div>
-      )}
-    </div>
-  );
-};
 
 export const ChatNodeOutput: FC<{
   outputs: Outputs;
@@ -66,10 +40,10 @@ export const ChatNodeOutput: FC<{
     const costAll = coerceTypeOptional(outputs['cost' as PortId], 'number[]') ?? [];
     const durationAll = coerceTypeOptional(outputs['duration' as PortId], 'number[]') ?? [];
 
-    const functionCallOutput = outputs['function-call' as PortId];
+    const functionCallOutput = outputs['function-call' as PortId] ?? outputs['function-calls' as PortId];
     const functionCallAll =
       functionCallOutput?.type === 'object[]'
-        ? functionCallOutput.value.map((v) => JSON.stringify(v))
+        ? functionCallOutput.value
         : coerceTypeOptional(functionCallOutput, 'string[]');
 
     return (
@@ -105,11 +79,7 @@ export const ChatNodeOutput: FC<{
     const cost = coerceTypeOptional(outputs['cost' as PortId], 'number');
     const duration = coerceTypeOptional(outputs['duration' as PortId], 'number');
 
-    const functionCallOutput = outputs['function-call' as PortId];
-    const functionCall =
-      functionCallOutput?.type === 'object'
-        ? JSON.stringify(functionCallOutput.value)
-        : coerceTypeOptional(functionCallOutput, 'string');
+    const functionCallOutput = outputs['function-call' as PortId] ?? outputs['function-calls' as PortId];
 
     return (
       <ChatNodeOutputSingle
@@ -117,7 +87,7 @@ export const ChatNodeOutput: FC<{
         requestTokens={requestTokens}
         responseTokens={responseTokens}
         cost={cost}
-        functionCall={functionCall}
+        functionCall={functionCallOutput?.value as object}
         duration={duration}
         fullscreen={fullscreen}
         renderMarkdown={renderMarkdown}
@@ -143,6 +113,7 @@ const ChatNodeOutputContainer = styled.div`
     justify-content: space-between;
     align-items: flex-start;
     min-height: 40px;
+    color: var(--grey-lighter);
   }
 
   &.fullscreen .metaInfo {
@@ -157,7 +128,7 @@ const ChatNodeOutputContainer = styled.div`
 
 export const ChatNodeOutputSingle: FC<{
   outputText: string | undefined;
-  functionCall: string | undefined;
+  functionCall: string | object | undefined;
   requestTokens: number | undefined;
   responseTokens: number | undefined;
   cost: number | undefined;
@@ -207,7 +178,7 @@ export const ChatNodeOutputSingle: FC<{
       </div>
       {functionCall && (
         <div className="function-call">
-          <h4>Function Call:</h4>
+          <h4>{Array.isArray(functionCall) ? 'Function Calls' : 'Function Call'}:</h4>
           <div className="pre-wrap">
             <RenderDataValue value={inferType(functionCall)} />
           </div>
@@ -225,7 +196,6 @@ const ChatNodeFullscreenOutput: FC<{
 };
 
 export const chatNodeDescriptor: NodeComponentDescriptor<'chat'> = {
-  Body: ChatNodeBody,
   OutputSimple: ChatNodeOutput,
   FullscreenOutputSimple: ChatNodeFullscreenOutput,
   defaultRenderMarkdown: true,

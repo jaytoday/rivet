@@ -1,10 +1,12 @@
-import { ChartNode, NodeId, NodeOutputDefinition, PortId, NodeInputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { Inputs, Outputs } from '../GraphProcessor.js';
-import { InternalProcessContext } from '../ProcessContext.js';
-import { EditorDefinition, coerceTypeOptional } from '../../index.js';
+import type { ChartNode, NodeId, NodeOutputDefinition, PortId, NodeInputDefinition } from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import type { Inputs, Outputs } from '../GraphProcessor.js';
+import type { InternalProcessContext } from '../ProcessContext.js';
+import type { EditorDefinition } from '../../index.js';
 import { dedent } from 'ts-dedent';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { coerceTypeOptional } from '../../utils/coerceType.js';
 
 export type AbortGraphNode = ChartNode<'abortGraph', AbortGraphNodeData>;
 
@@ -43,6 +45,7 @@ export class AbortGraphNodeImpl extends NodeImpl<AbortGraphNode> {
         id: 'data' as PortId,
         title: 'Data or Error',
         dataType: 'any',
+        description: 'The message to abort the graph with.',
       },
     ];
 
@@ -51,6 +54,7 @@ export class AbortGraphNodeImpl extends NodeImpl<AbortGraphNode> {
         id: 'successfully' as PortId,
         title: 'Successfully',
         dataType: 'boolean',
+        description: 'Whether to successfully abort the graph (early-exit), or error abort the graph.',
       });
     }
 
@@ -83,10 +87,10 @@ export class AbortGraphNodeImpl extends NodeImpl<AbortGraphNode> {
         this.data.useSuccessfullyInput
           ? 'Success depends on input'
           : this.data.successfully
-          ? 'Successfully Abort'
-          : this.data.errorMessage
-          ? `Error Abort: ${this.data.errorMessage}`
-          : 'Error Abort'
+            ? 'Successfully Abort'
+            : this.data.errorMessage
+              ? `Error Abort: ${this.data.errorMessage}`
+              : 'Error Abort'
       }
     `;
   }

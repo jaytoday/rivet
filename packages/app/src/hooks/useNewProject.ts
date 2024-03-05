@@ -1,21 +1,9 @@
 import { useSetRecoilState } from 'recoil';
 import { loadedProjectState, projectState } from '../state/savedGraphs.js';
-import { nanoid } from 'nanoid';
-import { Project, ProjectId, emptyNodeGraph } from '@ironclad/rivet-core';
+import { emptyNodeGraph } from '@ironclad/rivet-core';
 import { graphState } from '../state/graph.js';
 import { trivetState } from '../state/trivet';
-
-export function blankProject(): Project {
-  return {
-    graphs: {},
-    metadata: {
-      id: nanoid() as ProjectId,
-      title: 'Untitled Project',
-      description: '',
-    },
-    plugins: [],
-  };
-}
+import { blankProject } from '../utils/blankProject';
 
 export function useNewProject() {
   const setProject = useSetRecoilState(projectState);
@@ -23,8 +11,19 @@ export function useNewProject() {
   const setGraphData = useSetRecoilState(graphState);
   const setTrivetData = useSetRecoilState(trivetState);
 
-  return () => {
-    setProject(blankProject());
+  return ({
+    title,
+    description,
+  }: {
+    title?: string;
+    description?: string;
+  } = {}) => {
+    const { data: _data, ...project } = blankProject();
+
+    project.metadata.title = title || project.metadata.title;
+    project.metadata.description = description || project.metadata.description;
+
+    setProject(project);
     setLoadedProject({ loaded: false, path: '' });
     setGraphData(emptyNodeGraph());
     setTrivetData({

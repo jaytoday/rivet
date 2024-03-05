@@ -1,9 +1,28 @@
-import { ChartNode, NodeId, NodeInputDefinition, PortId, NodeOutputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { EditorDefinition, Inputs, NodeBodySpec, Outputs, coerceType } from '../../index.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type PortId,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import {
+  type AssistantChatMessage,
+  type ChatMessage,
+  type EditorDefinition,
+  type Inputs,
+  type InternalProcessContext,
+  type NodeBodySpec,
+  type Outputs,
+} from '../../index.js';
 import { mapValues } from 'lodash-es';
 import { dedent } from 'ts-dedent';
+import { coerceType, coerceTypeOptional } from '../../utils/coerceType.js';
+import { getInputOrData } from '../../utils/index.js';
+import { interpolate } from '../../utils/interpolation.js';
+import { match } from 'ts-pattern';
 
 export type PromptNode = ChartNode<'prompt', PromptNodeData>;
 
@@ -16,10 +35,11 @@ export type PromptNodeData = {
   name?: string;
   useNameInput?: boolean;
   enableFunctionCall?: boolean;
+  computeTokenCount?: boolean;
 };
 
 export class PromptNodeImpl extends NodeImpl<PromptNode> {
-  static create(promptText: string = '{{input}}'): PromptNode {
+  static create(): PromptNode {
     const chartNode: PromptNode = {
       type: 'prompt',
       title: 'Prompt',
@@ -32,7 +52,7 @@ export class PromptNodeImpl extends NodeImpl<PromptNode> {
       data: {
         type: 'user',
         useTypeInput: false,
-        promptText,
+        promptText: '{{input}}',
         enableFunctionCall: false,
       },
     };
@@ -62,7 +82,7 @@ export class PromptNodeImpl extends NodeImpl<PromptNode> {
     if (this.data.useNameInput) {
       inputs.push({
         id: 'name' as PortId,
-        title: 'Name',
+        title: 'Name/ID',
         dataType: 'string',
       });
     }
@@ -86,13 +106,23 @@ export class PromptNodeImpl extends NodeImpl<PromptNode> {
   }
 
   getOutputDefinitions(): NodeOutputDefinition[] {
-    return [
+    const outputs: NodeOutputDefinition[] = [
       {
         id: 'output' as PortId,
         title: 'Output',
         dataType: 'chat-message',
       },
     ];
+
+    if (this.chartNode.data.computeTokenCount) {
+      outputs.push({
+        id: 'tokenCount' as PortId,
+        title: 'Token Count',
+        dataType: 'number',
+      });
+    }
+
+    return outputs;
   }
 
   getEditors(): EditorDefinition<PromptNode>[] {
@@ -114,11 +144,20 @@ export class PromptNodeImpl extends NodeImpl<PromptNode> {
         label: 'Name',
         dataKey: 'name',
         useInputToggleDataKey: 'useNameInput',
+        hideIf: (data) => data.type !== 'function',
+        helperMessage:
+          'For OpenAI, this is the tool call ID. Otherwise, it is the name of the function that is outputting the message.',
       },
       {
         type: 'toggle',
         label: 'Enable Function Call',
         dataKey: 'enableFunctionCall',
+        hideIf: (data) => data.type !== 'assistant',
+      },
+      {
+        type: 'toggle',
+        label: 'Compute Token Count',
+        dataKey: 'computeTokenCount',
       },
       {
         type: 'code',
@@ -162,31 +201,83 @@ export class PromptNodeImpl extends NodeImpl<PromptNode> {
     };
   }
 
-  interpolate(baseString: string, values: Record<string, string>): string {
-    return baseString.replace(/\{\{([^}]+)\}\}/g, (_m, p1) => {
-      const value = values[p1];
-      return value !== undefined ? value : '';
-    });
-  }
-
-  async process(inputs: Inputs): Promise<Outputs> {
+  async process(inputs: Inputs, context: InternalProcessContext<PromptNode>): Promise<Outputs> {
     const inputMap = mapValues(inputs, (input) => coerceType(input, 'string')) as Record<PortId, string>;
 
-    const outputValue = this.interpolate(this.chartNode.data.promptText, inputMap);
+    const outputValue = interpolate(this.chartNode.data.promptText, inputMap);
 
-    return {
+    const type = getInputOrData(this.data, inputs, 'type', 'string');
+
+    if (['assistant', 'system', 'user', 'function'].includes(type) === false) {
+      throw new Error(`Invalid type: ${type}`);
+    }
+
+    const message = match(type)
+      .with(
+        'system',
+        (type): ChatMessage => ({
+          type,
+          message: outputValue,
+        }),
+      )
+      .with(
+        'user',
+        (type): ChatMessage => ({
+          type,
+          message: outputValue,
+        }),
+      )
+      .with('assistant', (type): ChatMessage => {
+        let functionCall = this.data.enableFunctionCall
+          ? coerceTypeOptional(inputs['function-call' as PortId], 'object')
+          : undefined;
+
+        // If no name is specified, ignore the function call
+        if (!functionCall?.name || !functionCall?.arguments) {
+          functionCall = undefined;
+        }
+
+        // GPT is weird - the arguments should be a stringified JSON object https://platform.openai.com/docs/api-reference/chat/create
+        if (functionCall?.arguments && typeof functionCall.arguments !== 'string') {
+          functionCall.arguments = JSON.stringify(functionCall.arguments);
+        }
+
+        return {
+          type,
+          message: outputValue,
+          function_call: functionCall as AssistantChatMessage['function_call'],
+        };
+      })
+      .with(
+        'function',
+        (type): ChatMessage => ({
+          type,
+          message: outputValue,
+          name: getInputOrData(this.data, inputs, 'name', 'string'),
+        }),
+      )
+      .otherwise(() => {
+        throw new Error(`Invalid chat-message type: ${type}`);
+      });
+
+    const outputs: Outputs = {
       ['output' as PortId]: {
         type: 'chat-message',
-        value: {
-          type: this.chartNode.data.type,
-          message: outputValue,
-          name: this.data.name,
-          function_call: this.data.enableFunctionCall
-            ? coerceType(inputs['function-call' as PortId], 'object')
-            : undefined,
-        },
+        value: message,
       },
     };
+
+    if (this.chartNode.data.computeTokenCount) {
+      const tokenCount = await context.tokenizer.getTokenCountForMessages([message], undefined, {
+        node: this.chartNode,
+      });
+      outputs['tokenCount' as PortId] = {
+        type: 'number',
+        value: tokenCount,
+      };
+    }
+
+    return outputs;
   }
 }
 

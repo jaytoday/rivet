@@ -1,5 +1,5 @@
 import { useLatest } from 'ahooks';
-import { FC, MutableRefObject, useEffect, useRef } from 'react';
+import { type FC, type MutableRefObject, useEffect, useRef } from 'react';
 import { monaco } from '../utils/monaco.js';
 import { useRecoilValue } from 'recoil';
 import { themeState } from '../state/settings';
@@ -12,9 +12,21 @@ export const CodeEditor: FC<{
   theme?: string;
   autoFocus?: boolean;
   onKeyDown?: (e: monaco.IKeyboardEvent) => void;
+  onBlur?: () => void;
   editorRef?: MutableRefObject<monaco.editor.IStandaloneCodeEditor | undefined>;
   scrollBeyondLastLine?: boolean;
-}> = ({ text, isReadonly, onChange, language, theme, autoFocus, onKeyDown, editorRef, scrollBeyondLastLine }) => {
+}> = ({
+  text,
+  isReadonly,
+  onChange,
+  language,
+  theme,
+  autoFocus,
+  onKeyDown,
+  onBlur,
+  editorRef,
+  scrollBeyondLastLine,
+}) => {
   const editorContainer = useRef<HTMLDivElement>(null);
   const editorInstance = useRef<monaco.editor.IStandaloneCodeEditor>();
 
@@ -54,6 +66,10 @@ export const CodeEditor: FC<{
 
     editor.onDidChangeModelContent(() => {
       onChangeLatest.current?.(editor.getValue());
+    });
+
+    editor.onDidBlurEditorWidget(() => {
+      onBlur?.();
     });
 
     editorInstance.current = editor;

@@ -1,44 +1,34 @@
-import { FC, useEffect, useMemo, useState, MouseEvent } from 'react';
+import { type FC, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { NodeCanvas } from './NodeCanvas.js';
 import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
-import { connectionsState, graphState, nodesByIdState } from '../state/graph.js';
-import { nodesState } from '../state/graph.js';
-import { editingNodeState, graphNavigationStackState, selectedNodesState } from '../state/graphBuilder.js';
+import { connectionsState, nodesByIdState, nodesState } from '../state/graph.js';
+import { editingNodeState, selectedNodesState } from '../state/graphBuilder.js';
 import { NodeEditorRenderer } from './NodeEditor.js';
 import styled from '@emotion/styled';
-import { useCanvasPositioning } from '../hooks/useCanvasPositioning.js';
 import { useStableCallback } from '../hooks/useStableCallback.js';
-import {
-  ArrayDataValue,
-  BuiltInNodes,
-  ChartNode,
-  GraphId,
-  NodeId,
-  StringDataValue,
-  globalRivetNodeRegistry,
-} from '@ironclad/rivet-core';
-import { ProcessQuestions, userInputModalQuestionsState, userInputModalSubmitState } from '../state/userInput.js';
+import { type ArrayDataValue, type ChartNode, type StringDataValue } from '@ironclad/rivet-core';
+import { type ProcessQuestions, userInputModalQuestionsState, userInputModalSubmitState } from '../state/userInput.js';
 import { UserInputModal } from './UserInputModal.js';
 import Button from '@atlaskit/button';
 import { isNotNull } from '../utils/genericUtilFunctions.js';
-import { useFactorIntoSubgraph } from '../hooks/useFactorIntoSubgraph.js';
 import { ErrorBoundary } from 'react-error-boundary';
 import { loadedRecordingState } from '../state/execution.js';
-import { useLoadGraph } from '../hooks/useLoadGraph.js';
-import { projectState } from '../state/savedGraphs.js';
-import { ContextMenuContext } from './ContextMenu.js';
 import { useGraphHistoryNavigation } from '../hooks/useGraphHistoryNavigation';
 import { useProjectPlugins } from '../hooks/useProjectPlugins';
 import { entries } from '../../../core/src/utils/typeSafety';
-import { useCurrentExecution } from '../hooks/useCurrentExecution';
-import { useGraphExecutor } from '../hooks/useGraphExecutor';
+import { useGraphBuilderContextMenuHandler } from '../hooks/useGraphBuilderContextMenuHandler';
+import { NavigationBar } from './NavigationBar';
+import { projectState } from '../state/savedGraphs';
+import { useDatasets } from '../hooks/useDatasets';
+import { overlayOpenState } from '../state/ui';
+import { GraphExecutionSelectorBar } from './GraphExecutionSelectorBar';
 
 const Container = styled.div`
   position: relative;
 
   .user-input-modal-open {
     position: absolute;
-    top: 62px;
+    top: calc(62px + var(--project-selector-height));
     right: 16px;
     z-index: 100;
   }
@@ -59,141 +49,21 @@ export const GraphBuilder: FC = () => {
   const [nodes, setNodes] = useRecoilState(nodesState);
   const [connections, setConnections] = useRecoilState(connectionsState);
   const [selectedNodeIds, setSelectedNodeIds] = useRecoilState(selectedNodesState);
-  const { clientToCanvasPosition } = useCanvasPositioning();
   const setEditingNodeId = useSetRecoilState(editingNodeState);
   const loadedRecording = useRecoilValue(loadedRecordingState);
-  const loadGraph = useLoadGraph();
   const project = useRecoilValue(projectState);
-  const [graphNavigationStack, setGraphNavigationStack] = useRecoilState(graphNavigationStackState);
+
+  useDatasets(project.metadata.id);
+
   const historyNav = useGraphHistoryNavigation();
   useProjectPlugins();
-  const { tryRunGraph } = useGraphExecutor();
 
   const nodesChanged = useStableCallback((newNodes: ChartNode[]) => {
     setNodes?.(newNodes);
   });
 
-  const addNode = useStableCallback((nodeType: string, position: { x: number; y: number }) => {
-    const newNode = globalRivetNodeRegistry.createDynamic(nodeType);
-
-    newNode.visualData.x = position.x;
-    newNode.visualData.y = position.y;
-
-    nodesChanged?.([...nodes, newNode]);
-    // setSelectedNode(newNode.id);
-  });
-
-  const removeNodes = useStableCallback((...nodeIds: NodeId[]) => {
-    const newNodes = [...nodes];
-    let newConnections = [...connections];
-    for (const nodeId of nodeIds) {
-      const nodeIndex = newNodes.findIndex((n) => n.id === nodeId);
-      if (nodeIndex >= 0) {
-        newNodes.splice(nodeIndex, 1);
-      }
-
-      // Remove all connections associated with the node
-      newConnections = newConnections.filter((c) => c.inputNodeId !== nodeId && c.outputNodeId !== nodeId);
-    }
-    nodesChanged?.(newNodes);
-    setConnections?.(newConnections);
-  });
-
-  const factorIntoSubgraph = useFactorIntoSubgraph();
   const nodesById = useRecoilValue(nodesByIdState);
-
-  const contextMenuItemSelected = useStableCallback(
-    (menuItemId: string, data: unknown, context: ContextMenuContext, meta: { x: number; y: number }) => {
-      if (menuItemId.startsWith('add-node:')) {
-        const nodeType = data as string;
-        addNode(nodeType, clientToCanvasPosition(meta.x, meta.y));
-        return;
-      }
-
-      if (menuItemId === 'node-delete') {
-        if (selectedNodeIds.length === 0) {
-          const { nodeId } = context.data as { nodeId: NodeId };
-          removeNodes(nodeId);
-        } else {
-          removeNodes(...selectedNodeIds);
-        }
-        return;
-      }
-
-      if (menuItemId === 'node-edit') {
-        const { nodeId } = context.data as { nodeId: NodeId };
-        setEditingNodeId(nodeId);
-        return;
-      }
-
-      if (menuItemId === 'node-duplicate') {
-        const { nodeId } = context.data as { nodeId: NodeId };
-        const node = nodesById[nodeId];
-
-        if (!node) {
-          return;
-        }
-
-        const newNode = globalRivetNodeRegistry.createDynamic(node.type);
-        newNode.data = { ...(node.data as object) };
-        newNode.visualData = {
-          ...node.visualData,
-          x: node.visualData.x,
-          y: node.visualData.y + 200,
-        };
-        newNode.title = node.title;
-        newNode.description = node.description;
-        newNode.isSplitRun = node.isSplitRun;
-        newNode.splitRunMax = node.splitRunMax;
-        nodesChanged?.([...nodes, newNode]);
-
-        // Copy the connections to the input ports
-        const oldNodeConnections = connections.filter((c) => c.inputNodeId === nodeId);
-        const newNodeConnections = oldNodeConnections.map((c) => ({
-          ...c,
-          inputNodeId: newNode.id,
-        }));
-        setConnections([...connections, ...newNodeConnections]);
-      }
-
-      if (menuItemId === 'nodes-factor-into-subgraph') {
-        factorIntoSubgraph();
-      }
-
-      if (menuItemId === 'node-go-to-subgraph') {
-        const { nodeId } = context.data as { nodeId: NodeId };
-        const node = nodesById[nodeId] as BuiltInNodes;
-
-        if (node?.type !== 'subGraph') {
-          return;
-        }
-
-        const { graphId } = node.data;
-
-        const graph = project.graphs[graphId];
-
-        if (!graph) {
-          return;
-        }
-
-        loadGraph(graph);
-      }
-
-      if (menuItemId.startsWith('go-to-graph:')) {
-        const graphId = data as GraphId;
-        const graph = project.graphs[graphId];
-        if (graph) {
-          loadGraph(graph);
-        }
-      }
-
-      if (menuItemId === 'node-run-to-here') {
-        const { nodeId } = context.data as { nodeId: NodeId };
-
-        tryRunGraph({ to: [nodeId] });
-      }
-    },
-  );
+  const contextMenuHandler = useGraphBuilderContextMenuHandler();
 
   const nodeSelected = useStableCallback((node: ChartNode, multi: boolean) => {
     if (!multi) {
@@ -244,13 +114,15 @@ export const GraphBuilder: FC = () => {
     }
   });
 
-  const [, questions] = firstNodeQuestions ? firstNodeQuestions : [undefined, [] as ProcessQuestions[]];
+  const [questionsNodeId, questions] = firstNodeQuestions ? firstNodeQuestions : [undefined, [] as ProcessQuestions[]];
   const lastQuestions = questions.at(-1)?.questions ?? [];
 
   const selectedNodes = useMemo(
     () => selectedNodeIds.map((nodeId) => nodesById[nodeId]).filter(isNotNull),
     [selectedNodeIds, nodesById],
   );
+
+  const overlay = useRecoilValue(overlayOpenState);
 
   return (
     <Container onMouseDown={containerMouseDown}>
@@ -263,7 +135,7 @@ export const GraphBuilder: FC = () => {
           onNodeSelected={nodeSelected}
           selectedNodes={selectedNodes}
           onNodeStartEditing={nodeStartEditing}
-          onContextMenuItemSelected={contextMenuItemSelected}
+          onContextMenuItemSelected={contextMenuHandler}
         />
         {loadedRecording && <div className="recording-border" />}
         <NodeEditorRenderer />
@@ -272,9 +144,12 @@ export const GraphBuilder: FC = () => {
             User Input Needed
           </Button>
         )}
+        {overlay === undefined && <NavigationBar />}
+        <GraphExecutionSelectorBar />
         <UserInputModal
           open={isUserInputModalOpen}
           questions={lastQuestions}
+          questionsNodeId={questionsNodeId}
           onSubmit={handleSubmitUserInputModal}
           onClose={handleCloseUserInputModal}
         />

@@ -4,7 +4,7 @@ export const nodeStyles = css`
   .node {
     background-color: var(--grey-dark-seethrough);
     border-radius: 8px;
-    border: 2px solid var(--grey);
+    border: 2px solid var(--node-border);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
@@ -34,22 +34,26 @@ export const nodeStyles = css`
     border-color: var(--primary);
     transition-duration: 0;
     pointer-events: none;
-    box-shadow: 10px 10px 16px rgba(0, 0, 0, 0.4), 0 0 10px var(--shadow-primary);
+    box-shadow:
+      10px 10px 16px rgba(0, 0, 0, 0.4),
+      0 0 10px var(--shadow-primary);
   }
 
-  .node:hover:not(.isComment),
+  .node.selected:not(.isComment),
   .node.selected:not(.isComment) {
     border-color: var(--primary);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4), 0 0 10px var(--shadow-primary);
-    z-index: 1000 !important;
+    box-shadow:
+      0 8px 16px rgba(0, 0, 0, 0.4),
+      0 0 10px var(--shadow-primary);
+    z-index: 10000 !important;
   }
 
   .node-title {
-    background-color: var(--grey-darkish);
-    color: var(--foreground-bright);
+    background-color: var(--node-bg);
+    color: var(--node-bg-foreground);
     padding: 12px;
     margin: -12px -12px 8px -12px;
-    border-radius: 8px 8px 0 0;
+    border-radius: 6px 6px 0 0;
     letter-spacing: 1px;
     display: flex;
     justify-content: space-between;
@@ -103,10 +107,13 @@ export const nodeStyles = css`
   .title-controls {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 0;
+    margin-right: -8px;
 
     .success,
-    .error {
+    .error,
+    .interrupted,
+    .not-ran {
       width: 24px;
       height: 24px;
       display: flex;
@@ -125,22 +132,35 @@ export const nodeStyles = css`
     button {
       background-color: transparent;
       border: none;
-      color: var(--grey-lighter);
+      color: var(--node-bg-foreground);
       cursor: pointer;
       font-size: 18px;
-      margin-left: 8px;
       transition: color 0.2s ease-out;
-      margin: -12px;
-      width: 46px;
+      margin: -12px 0;
+      width: 30px;
       height: 46px;
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: 0;
+
+      svg {
+        width: 18px;
+      }
     }
 
     button:hover {
       color: var(--primary-text);
     }
+  }
+
+  .node.isPinned .title-controls .pin-button {
+    color: var(--primary-text);
+  }
+
+  .title-controls .tooltip {
+    display: flex;
+    align-items: center;
   }
 
   .node.isComment .title-controls {
@@ -171,6 +191,30 @@ export const nodeStyles = css`
     display: flex;
     justify-content: space-between;
     margin: 0 -12px 0 -12px;
+  }
+
+  .node-ports-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .node-ports-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    > header {
+      background: var(--node-bg);
+      color: var(--node-bg-foreground);
+      align-self: flex-start;
+      padding: 4px 8px;
+      margin-left: -12px;
+      font-size: 12px;
+      font-family: var(--font-family-monospace);
+      border-radius: 0 4px 4px 0;
+      user-select: none;
+    }
   }
 
   .input-ports,
@@ -205,15 +249,16 @@ export const nodeStyles = css`
     white-space: nowrap;
     user-select: none;
     opacity: 0.5;
-    transition: opacity 0.2s ease-out;
+    cursor: default;
   }
 
   .node.zoomedOut .port-label {
     display: none;
   }
 
-  .node:hover .port-label,
-  .node.overlayNode .port-label {
+  .node.selected .port-label,
+  .node.overlayNode .port-label,
+  .port-label:hover {
     opacity: 1;
   }
 
@@ -267,6 +312,18 @@ export const nodeStyles = css`
   .port.closest .port-circle {
     background-color: var(--primary);
     border: 2px solid var(--primary-dark);
+  }
+
+  .port.compatible:not(.connected) .port-circle {
+    border: 2px solid var(--success);
+  }
+
+  .port.coerced .port-circle {
+    border: 2px solid var(--warning);
+  }
+
+  .port.incompatible .port-circle {
+    border: 2px solid var(--error);
   }
 
   .port.connected .port-label {
@@ -356,8 +413,19 @@ export const nodeStyles = css`
     border-top-color: var(--error-light);
   }
 
+  .node.not-ran .node-output:not(.multi) .node-output-inner,
+  .node.not-ran .multi-node-output {
+    border-top-style: dashed;
+    border-top-color: var(--grey-lightish);
+  }
+
   .node:hover .node-output-inner {
     max-height: 500px;
+    overflow: auto;
+  }
+
+  .node.isPinned .node-output-inner {
+    max-height: unset;
     overflow: auto;
   }
 
@@ -391,6 +459,10 @@ export const nodeStyles = css`
     border-top-color: var(--error-light);
   }
 
+  .node.not-ran .node-output:before {
+    border-top-color: var(--grey-lightish);
+  }
+
   .node-output.errored:before {
     border-top: 8px solid var(--error-light);
   }
@@ -405,6 +477,7 @@ export const nodeStyles = css`
     right: 4px;
     display: flex;
     gap: 8px;
+    z-index: 10;
   }
 
   .copy-button,
@@ -458,7 +531,9 @@ export const nodeStyles = css`
   }
 
   .node.running {
-    box-shadow: 0 0 16px var(--shadow-primary-bright), 0 8px 16px rgba(0, 0, 0, 0.4);
+    box-shadow:
+      0 0 16px var(--shadow-primary-bright),
+      0 8px 16px rgba(0, 0, 0, 0.4);
   }
 
   .split-output {
@@ -515,5 +590,36 @@ export const nodeStyles = css`
     top: 8px;
     transform: translate(-50%, -50%);
     /* background-color: rgba(1, 1, 1, 0.5); */
+  }
+
+  .node-output .function-call {
+    h4 {
+      margin-top: 0;
+      margin-bottom: 0;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: normal;
+      color: var(--primary-text);
+    }
+  }
+
+  .node.disabled {
+    opacity: 0.5;
+
+    .node-title {
+      text-decoration: line-through;
+    }
+  }
+
+  .port-id-label {
+    font-style: normal;
+    color: var(--primary);
+    font-family: var(--font-family-monospace);
+  }
+
+  .rendered-data-outputs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 `;

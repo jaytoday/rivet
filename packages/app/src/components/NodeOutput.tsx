@@ -1,39 +1,55 @@
 import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
-import { NodeRunData, ProcessDataForNode, lastRunData, selectedProcessPage } from '../state/dataFlow.js';
-import { FC, ReactNode, memo, useMemo, useState } from 'react';
+import { type NodeRunData, type ProcessDataForNode, lastRunData, selectedProcessPage } from '../state/dataFlow.js';
+import { type FC, type ReactNode, memo, useMemo, useState, type MouseEvent } from 'react';
 import { useUnknownNodeComponentDescriptorFor } from '../hooks/useNodeTypes.js';
 import { useStableCallback } from '../hooks/useStableCallback.js';
 import { copyToClipboard } from '../utils/copyToClipboard.js';
-import { ChartNode, PortId, ProcessId, getWarnings } from '@ironclad/rivet-core';
+import { type ChartNode, type PortId, type ProcessId, getWarnings } from '@ironclad/rivet-core';
 import { css } from '@emotion/react';
-import { ReactComponent as CopyIcon } from 'majesticons/line/clipboard-line.svg';
-import { ReactComponent as ExpandIcon } from 'majesticons/line/maximize-line.svg';
-import { ReactComponent as FlaskIcon } from 'majesticons/line/flask-line.svg';
+import CopyIcon from 'majesticons/line/clipboard-line.svg?react';
+import ExpandIcon from 'majesticons/line/maximize-line.svg?react';
+import FlaskIcon from 'majesticons/line/flask-line.svg?react';
 import { FullScreenModal } from './FullScreenModal.js';
 import { RenderDataOutputs } from './RenderDataValue.js';
 import { orderBy } from 'lodash-es';
-import { promptDesignerAttachedChatNodeState, promptDesignerState } from '../state/promptDesigner.js';
+import { promptDesignerAttachedChatNodeState } from '../state/promptDesigner.js';
 import { overlayOpenState } from '../state/ui';
 import { useDependsOnPlugins } from '../hooks/useDependsOnPlugins';
 import { entries } from '../../../core/src/utils/typeSafety';
 import { useToggle } from 'ahooks';
 import Toggle from '@atlaskit/toggle';
+import { pinnedNodesState } from '../state/graphBuilder';
+import { useNodeIO } from '../hooks/useGetNodeIO';
+import { Tooltip } from './Tooltip';
 
 export const NodeOutput: FC<{ node: ChartNode }> = memo(({ node }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   useDependsOnPlugins();
+
+  const isPinned = useRecoilValue(pinnedNodesState).includes(node.id);
+
+  const handleWheel = useStableCallback((e: MouseEvent<HTMLDivElement>) => {
+    if (isPinned) {
+      return; // Scroll is allowed because there's no scroll bar when pinned
+    }
+
+    // Prevent zooming the graph when scrolling the output
+    e.stopPropagation();
+  });
 
   return (
     <div className="node-output-outer">
       <FullScreenModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <NodeFullscreenOutput node={node} />
       </FullScreenModal>
-      <div onWheel={(e) => e.stopPropagation()}>
+      <div onWheel={handleWheel}>
         <NodeOutputBase node={node} onOpenFullscreenModal={() => setIsModalOpen(true)} />
       </div>
     </div>
   );
 });
+
+NodeOutput.displayName = 'NodeOutput';
 
 const fullscreenOutputCss = css`
   position: relative;
@@ -158,6 +174,8 @@ const NodeFullscreenOutput: FC<{ node: ChartNode }> = ({ node }) => {
   const setOverlayOpen = useSetRecoilState(overlayOpenState);
   const setPromptDesignerAttachedNode = useSetRecoilState(promptDesignerAttachedChatNodeState);
 
+  const io = useNodeIO(node.id);
+
   const { data, processId } = useMemo(() => {
     if (!output?.length) {
       return { data: undefined, processId: undefined };
@@ -193,7 +211,12 @@ const NodeFullscreenOutput: FC<{ node: ChartNode }> = ({ node }) => {
     if (outputValue.type === 'string') {
       copyToClipboard(outputValue.value);
     } else if (outputValue.type === 'chat-message') {
-      copyToClipboard(outputValue.value.message);
+      if (Array.isArray(outputValue.value)) {
+        const singleString = outputValue.value.map((v) => (typeof v === 'string' ? v : '(Image)')).join('\n\n');
+        copyToClipboard(singleString);
+      } else {
+        copyToClipboard(typeof outputValue.value.message === 'string' ? outputValue.value.message : '(Image)');
+      }
     } else {
       copyToClipboard(JSON.stringify(outputValue, null, 2));
     }
@@ -258,7 +281,12 @@ const NodeFullscreenOutput: FC<{ node: ChartNode }> = ({ node }) => {
           ) : OutputSimple ? (
             <OutputSimple key={`outputs-${key}`} outputs={value} />
           ) : (
-            <RenderDataOutputs key={`outputs-${key}`} outputs={value} renderMarkdown={renderMarkdown} />
+            <RenderDataOutputs
+              key={`outputs-${key}`}
+              definitions={io.outputDefinitions}
+              outputs={value}
+              renderMarkdown={renderMarkdown}
+            />
           ),
         )}
       </div>
@@ -269,7 +297,11 @@ const NodeFullscreenOutput: FC<{ node: ChartNode }> = ({ node }) => {
     ) : OutputSimple ? (
       <OutputSimple outputs={data.outputData!} />
     ) : (
-      <RenderDataOutputs outputs={data.outputData!} renderMarkdown={renderMarkdown} />
+      <RenderDataOutputs
+        definitions={io.outputDefinitions}
+        outputs={data.outputData!}
+        renderMarkdown={renderMarkdown}
+      />
     );
   }
 
@@ -353,6 +385,7 @@ const NodeOutputSingleProcess: FC<{
 
   const setOverlayOpen = useSetRecoilState(overlayOpenState);
   const setPromptDesignerAttachedNode = useSetRecoilState(promptDesignerAttachedChatNodeState);
+  const io = useNodeIO(node.id);
 
   const handleOpenPromptDesigner = () => {
     setOverlayOpen('promptDesigner');
@@ -370,7 +403,12 @@ const NodeOutputSingleProcess: FC<{
       if (outputValue.type === 'string') {
         copyToClipboard(outputValue.value);
       } else if (outputValue.type === 'chat-message') {
-        copyToClipboard(outputValue.value.message);
+        if (Array.isArray(outputValue.value)) {
+          const singleString = outputValue.value.map((v) => (typeof v === 'string' ? v : '(Image)')).join('\n\n');
+          copyToClipboard(singleString);
+        } else {
+          copyToClipboard(typeof outputValue.value.message === 'string' ? outputValue.value.message : '(Image)');
+        }
       } else {
         copyToClipboard(JSON.stringify(outputValue, null, 2));
       }
@@ -404,7 +442,7 @@ const NodeOutputSingleProcess: FC<{
           OutputSimple ? (
             <OutputSimple key={`outputs-${key}`} outputs={value} />
           ) : (
-            <RenderDataOutputs key={`outputs-${key}`} outputs={value} />
+            <RenderDataOutputs definitions={io.outputDefinitions} key={`outputs-${key}`} outputs={value} />
           ),
         )}
       </div>
@@ -413,20 +451,25 @@ const NodeOutputSingleProcess: FC<{
     body = OutputSimple ? (
       <OutputSimple outputs={data.outputData!} />
     ) : (
-      <RenderDataOutputs outputs={data.outputData!} />
+      <RenderDataOutputs definitions={io.outputDefinitions} outputs={data.outputData!} />
     );
   }
 
   return (
     <div className="node-output-inner">
       <div className="overlay-buttons">
-        <div className="copy-button" onClick={handleCopyToClipboard}>
-          <CopyIcon />
-        </div>
-        {node.type === 'chat' && (
-          <div className="prompt-designer-button" onClick={handleOpenPromptDesigner}>
-            <FlaskIcon />
+        <Tooltip content="Copy node output to clipboard">
+          <div className="copy-button" onClick={handleCopyToClipboard}>
+            <CopyIcon />
           </div>
+        </Tooltip>
+
+        {node.type === 'chat' && (
+          <Tooltip content="Open chat in Prompt Designer">
+            <div className="prompt-designer-button" onClick={handleOpenPromptDesigner}>
+              <FlaskIcon />
+            </div>
+          </Tooltip>
         )}
         <div
           className="expand-button"
@@ -461,14 +504,14 @@ const NodeOutputMultiProcess: FC<{
 
   const prevPage = useStableCallback(() => {
     setSelectedPage((page) => {
-      const pageNum = page === 'latest' ? data.length : page;
+      const pageNum = page === 'latest' ? data.length - 1 : page;
       return pageNum > 0 ? pageNum - 1 : pageNum;
     });
   });
 
   const nextPage = useStableCallback(() => {
     setSelectedPage((page) => {
-      const pageNum = page === 'latest' ? data.length : page;
+      const pageNum = page === 'latest' ? data.length - 1 : page;
       return pageNum < data.length - 1 ? pageNum + 1 : pageNum;
     });
   });
@@ -482,11 +525,11 @@ const NodeOutputMultiProcess: FC<{
     <div className="node-output multi">
       <div className="multi-node-output">
         <div className="picker">
-          <button className="picker-left" onClick={prevPage}>
+          <button className="picker-left" onClick={prevPage} onDoubleClick={(e) => e.stopPropagation()}>
             {'<'}
           </button>
           <div className="picker-page">{selectedPage === 'latest' ? data.length : selectedPage + 1}</div>
-          <button className="picker-right" onClick={nextPage}>
+          <button className="picker-right" onClick={nextPage} onDoubleClick={(e) => e.stopPropagation()}>
             {'>'}
           </button>
         </div>

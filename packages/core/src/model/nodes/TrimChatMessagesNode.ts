@@ -1,15 +1,31 @@
-import { ChartNode, NodeId, PortId, NodeInputDefinition, NodeOutputDefinition } from '../../model/NodeBase.js';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../../model/NodeImpl.js';
-import { SupportedModels, getTokenCountForMessages } from '../../utils/tokenizer.js';
-import { nanoid } from 'nanoid';
-import { EditorDefinition, Inputs, NodeBodySpec, Outputs, expectType } from '../../index.js';
-import { ChatCompletionRequestMessage, openAiModelOptions, openaiModels } from '../../utils/openai.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type PortId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+} from '../../model/NodeBase.js';
+import { NodeImpl, type NodeUIData } from '../../model/NodeImpl.js';
+import { nanoid } from 'nanoid/non-secure';
+import {
+  type EditorDefinition,
+  type Inputs,
+  type InternalProcessContext,
+  type NodeBodySpec,
+  type Outputs,
+} from '../../index.js';
 import { dedent } from 'ts-dedent';
+import { nodeDefinition } from '../NodeDefinition.js';
+import type { TokenizerCallInfo } from '../../integrations/Tokenizer.js';
+import { coerceType } from '../../utils/coerceType.js';
+import { getInputOrData } from '../../utils/index.js';
 
 export type TrimChatMessagesNodeData = {
   maxTokenCount: number;
+  useMaxTokenCountInput?: boolean;
+
   removeFromBeginning: boolean;
-  model: SupportedModels;
+  useRemoveFromBeginningInput?: boolean;
 };
 
 export type TrimChatMessagesNode = ChartNode<'trimChatMessages', TrimChatMessagesNodeData>;
@@ -28,7 +44,6 @@ export class TrimChatMessagesNodeImpl extends NodeImpl<TrimChatMessagesNode> {
       data: {
         maxTokenCount: 4096,
         removeFromBeginning: true,
-        model: 'gpt-3.5-turbo',
       },
     };
 
@@ -36,13 +51,31 @@ export class TrimChatMessagesNodeImpl extends NodeImpl<TrimChatMessagesNode> {
   }
 
   getInputDefinitions(): NodeInputDefinition[] {
-    return [
+    const inputs: NodeInputDefinition[] = [
       {
         id: 'input' as PortId,
         title: 'Input',
         dataType: 'chat-message[]',
       },
     ];
+
+    if (this.data.useMaxTokenCountInput) {
+      inputs.push({
+        id: 'maxTokenCount' as PortId,
+        title: 'Max Token Count',
+        dataType: 'number',
+      });
+    }
+
+    if (this.data.useRemoveFromBeginningInput) {
+      inputs.push({
+        id: 'removeFromBeginning' as PortId,
+        title: 'Remove From Beginning',
+        dataType: 'boolean',
+      });
+    }
+
+    return inputs;
   }
 
   getOutputDefinitions(): NodeOutputDefinition[] {
@@ -61,25 +94,23 @@ export class TrimChatMessagesNodeImpl extends NodeImpl<TrimChatMessagesNode> {
         type: 'number',
         label: 'Max Token Count',
         dataKey: 'maxTokenCount',
+        useInputToggleDataKey: 'useMaxTokenCountInput',
       },
       {
         type: 'toggle',
         label: 'Remove From Beginning',
         dataKey: 'removeFromBeginning',
-      },
-      {
-        type: 'dropdown',
-        label: 'Model',
-        dataKey: 'model',
-        options: openAiModelOptions,
+        useInputToggleDataKey: 'useRemoveFromBeginningInput',
       },
     ];
   }
 
   getBody(): string | NodeBodySpec | undefined {
     return dedent`
-      Max Token Count: ${this.data.maxTokenCount}
-      Remove From Beginning: ${this.data.removeFromBeginning ? 'Yes' : 'No'}
+      Max Token Count: ${this.data.useMaxTokenCountInput ? '(From Input)' : this.data.maxTokenCount}
+      Remove From Beginning: ${
+        this.data.useRemoveFromBeginningInput ? '(From Input)' : this.data.removeFromBeginning ? 'Yes' : 'No'
+      }
     `;
   }
 
@@ -96,27 +127,19 @@ export class TrimChatMessagesNodeImpl extends NodeImpl<TrimChatMessagesNode> {
     };
   }
 
-  async process(inputs: Inputs): Promise<Outputs> {
-    const input = expectType(inputs['input' as PortId], 'chat-message[]');
-    const maxTokenCount = this.chartNode.data.maxTokenCount;
-    const removeFromBeginning = this.chartNode.data.removeFromBeginning;
+  async process(inputs: Inputs, context: InternalProcessContext<TrimChatMessagesNode>): Promise<Outputs> {
+    const input = coerceType(inputs['input' as PortId], 'chat-message[]');
 
-    const model = 'gpt-3.5-turbo' as SupportedModels; // You can change this to a configurable model if needed
-    const tiktokenModel = openaiModels[model].tiktokenModel;
+    const maxTokenCount = getInputOrData(this.data, inputs, 'maxTokenCount', 'number');
+    const removeFromBeginning = getInputOrData(this.data, inputs, 'removeFromBeginning', 'boolean');
 
     const trimmedMessages = [...input];
 
-    let tokenCount = getTokenCountForMessages(
-      trimmedMessages.map(
-        (message): ChatCompletionRequestMessage => ({
-          content: message.message,
-          role: message.type,
-          name: message.name,
-          function_call: message.function_call,
-        }),
-      ),
-      tiktokenModel,
-    );
+    const tokenizerInfo: TokenizerCallInfo = {
+      node: this.chartNode,
+    };
+
+    let tokenCount = await context.tokenizer.getTokenCountForMessages(trimmedMessages, undefined, tokenizerInfo);
 
     while (tokenCount > maxTokenCount) {
       if (removeFromBeginning) {
@@ -124,17 +147,7 @@ export class TrimChatMessagesNodeImpl extends NodeImpl<TrimChatMessagesNode> {
       } else {
         trimmedMessages.pop();
       }
-      tokenCount = getTokenCountForMessages(
-        trimmedMessages.map(
-          (message): ChatCompletionRequestMessage => ({
-            content: message.message,
-            role: message.type,
-            function_call: message.function_call,
-            name: message.name,
-          }),
-        ),
-        tiktokenModel,
-      );
+      tokenCount = await context.tokenizer.getTokenCountForMessages(trimmedMessages, undefined, tokenizerInfo);
     }
 
     return {

@@ -1,15 +1,24 @@
-import { DefaultValue, atom, selector } from 'recoil';
-import { nanoid } from 'nanoid';
+import { DefaultValue, atom, atomFamily, selector, selectorFamily } from 'recoil';
+import { nanoid } from 'nanoid/non-secure';
 import { produce } from 'immer';
-import { GraphId, NodeGraph, Project, ProjectId } from '@ironclad/rivet-core';
-import { blankProject } from '../hooks/useNewProject.js';
+import {
+  type NodeId,
+  type DataId,
+  type GraphId,
+  type NodeGraph,
+  type Project,
+  type ProjectId,
+  type ChartNode,
+  type DataValue,
+} from '@ironclad/rivet-core';
+import { blankProject } from '../utils/blankProject.js';
 import { recoilPersist } from 'recoil-persist';
 import { entries, values } from '../../../core/src/utils/typeSafety';
 
 const { persistAtom } = recoilPersist({ key: 'project' });
 
 // What's the data of the last loaded project?
-export const projectState = atom<Project>({
+export const projectState = atom<Omit<Project, 'data'>>({
   key: 'projectState',
   default: {
     metadata: {
@@ -20,7 +29,12 @@ export const projectState = atom<Project>({
     graphs: {},
     plugins: [],
   },
-  effects_UNSTABLE: [persistAtom],
+  effects: [persistAtom],
+});
+
+export const projectDataState = atom<Record<DataId, string> | undefined>({
+  key: 'projectDataState',
+  default: undefined,
 });
 
 export const projectMetadataState = selector({
@@ -68,7 +82,7 @@ export const loadedProjectState = atom<{
     path: '',
     loaded: false,
   },
-  effects_UNSTABLE: [persistAtom],
+  effects: [persistAtom],
 });
 
 export const savedGraphsState = selector<NodeGraph[]>({
@@ -117,4 +131,69 @@ export const projectPluginsState = selector({
       };
     });
   },
+});
+
+export type OpenedProjectInfo = {
+  project: Project;
+  fsPath?: string | null;
+  openedGraph?: GraphId;
+};
+
+export type OpenedProjectsInfo = {
+  openedProjects: Record<ProjectId, OpenedProjectInfo>;
+  openedProjectsSortedIds: ProjectId[];
+};
+
+export const projectsState = atom<OpenedProjectsInfo>({
+  key: 'projectsState',
+  default: {
+    openedProjects: {},
+    openedProjectsSortedIds: [],
+  },
+  effects: [persistAtom],
+});
+
+export const openedProjectsState = selector({
+  key: 'openedProjectsState',
+  get: ({ get }) => {
+    return get(projectsState).openedProjects;
+  },
+  set: ({ set }, newValue) => {
+    set(projectsState, (oldValue) => {
+      return {
+        ...oldValue,
+        openedProjects: newValue instanceof DefaultValue ? {} : newValue,
+      };
+    });
+  },
+});
+
+export const openedProjectsSortedIdsState = selector({
+  key: 'openedProjectsSortedIdsState',
+  get: ({ get }) => {
+    return get(projectsState).openedProjectsSortedIds;
+  },
+  set: ({ set }, newValue) => {
+    set(projectsState, (oldValue) => {
+      return {
+        ...oldValue,
+        openedProjectsSortedIds: newValue instanceof DefaultValue ? [] : newValue,
+      };
+    });
+  },
+});
+
+/** Project context values stored in the IDE and not in the project file. Available in Context nodes. */
+export type ProjectContext = Record<
+  string,
+  {
+    value: DataValue;
+    secret: boolean;
+  }
+>;
+
+export const projectContextState = atomFamily<ProjectContext, ProjectId>({
+  key: 'projectContext',
+  default: {},
+  effects: [persistAtom],
 });

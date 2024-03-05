@@ -1,6 +1,6 @@
-import { ChartNode } from './NodeBase.js';
+import type { ChartNode } from './NodeBase.js';
 import { NodeRegistration } from './NodeRegistration.js';
-import { NodeImpl } from './NodeImpl.js';
+import type { NodeImpl } from './NodeImpl.js';
 
 import { userInputNode } from './nodes/UserInputNode.js';
 export * from './nodes/UserInputNode.js';
@@ -158,6 +158,60 @@ export * from './nodes/ImageNode.js';
 import { audioNode } from './nodes/AudioNode.js';
 export * from './nodes/AudioNode.js';
 
+import { httpCallNode } from './nodes/HttpCallNode.js';
+export * from './nodes/HttpCallNode.js';
+
+import { delayNode } from './nodes/DelayNode.js';
+export * from './nodes/DelayNode.js';
+
+import { appendToDatasetNode } from './nodes/AppendToDatasetNode.js';
+export * from './nodes/AppendToDatasetNode.js';
+
+import { createDatasetNode } from './nodes/CreateDatasetNode.js';
+export * from './nodes/CreateDatasetNode.js';
+
+import { loadDatasetNode } from './nodes/LoadDatasetNode.js';
+export * from './nodes/LoadDatasetNode.js';
+
+import { getAllDatasetsNode } from './nodes/GetAllDatasetsNode.js';
+export * from './nodes/GetAllDatasetsNode.js';
+
+import { splitNode } from './nodes/SplitNode.js';
+export * from './nodes/SplitNode.js';
+
+import { datasetNearestNeighborsNode } from './nodes/DatasetNearestNeigborsNode.js';
+export * from './nodes/DatasetNearestNeigborsNode.js';
+
+import { getDatasetRowNode } from './nodes/GetDatasetRowNode.js';
+export * from './nodes/GetDatasetRowNode.js';
+
+import { sliceNode } from './nodes/SliceNode.js';
+export * from './nodes/SliceNode.js';
+
+import { extractMarkdownCodeBlocksNode } from './nodes/ExtractMarkdownCodeBlocksNode.js';
+export * from './nodes/ExtractMarkdownCodeBlocksNode.js';
+
+import { assembleMessageNode } from './nodes/AssembleMessageNode.js';
+export * from './nodes/AssembleMessageNode.js';
+
+import { urlReferenceNode } from './nodes/URLReferenceNode.js';
+export * from './nodes/URLReferenceNode.js';
+
+import { destructureNode } from './nodes/DestructureNode.js';
+export * from './nodes/DestructureNode.js';
+
+import { replaceDatasetNode } from './nodes/ReplaceDatasetNode.js';
+export * from './nodes/ReplaceDatasetNode.js';
+
+import { listGraphsNode } from './nodes/ListGraphsNode.js';
+export * from './nodes/ListGraphsNode.js';
+
+import { graphReferenceNode } from './nodes/GraphReferenceNode.js';
+export * from './nodes/GraphReferenceNode.js';
+
+import { callGraphNode } from './nodes/CallGraphNode.js';
+export * from './nodes/CallGraphNode.js';
+
 export const registerBuiltInNodes = (registry: NodeRegistration) => {
   return registry
     .register(toYamlNode)
@@ -211,7 +265,25 @@ export const registerBuiltInNodes = (registry: NodeRegistration) => {
     .register(shuffleNode)
     .register(commentNode)
     .register(imageNode)
-    .register(audioNode);
+    .register(audioNode)
+    .register(httpCallNode)
+    .register(delayNode)
+    .register(appendToDatasetNode)
+    .register(createDatasetNode)
+    .register(loadDatasetNode)
+    .register(getAllDatasetsNode)
+    .register(splitNode)
+    .register(datasetNearestNeighborsNode)
+    .register(getDatasetRowNode)
+    .register(sliceNode)
+    .register(extractMarkdownCodeBlocksNode)
+    .register(assembleMessageNode)
+    .register(urlReferenceNode)
+    .register(destructureNode)
+    .register(replaceDatasetNode)
+    .register(listGraphsNode)
+    .register(graphReferenceNode)
+    .register(callGraphNode);
 };
 
 let globalRivetNodeRegistry = registerBuiltInNodes(new NodeRegistration());

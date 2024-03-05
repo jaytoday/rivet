@@ -1,11 +1,18 @@
-import { ChartNode, NodeId, NodeInputDefinition, PortId, NodeOutputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { DataValue } from '../DataValue.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type PortId,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type DataValue } from '../DataValue.js';
 import { expectType, expectTypeOptional } from '../../utils/expectType.js';
 import { dedent } from 'ts-dedent';
-import { EditorDefinition } from '../EditorDefinition.js';
-import { NodeBodySpec } from '../NodeBodySpec.js';
+import { type EditorDefinition } from '../EditorDefinition.js';
+import { type NodeBodySpec } from '../NodeBodySpec.js';
 
 export type ExtractRegexNode = ChartNode<'extractRegex', ExtractRegexNodeData>;
 
@@ -13,10 +20,11 @@ export type ExtractRegexNodeData = {
   regex: string;
   useRegexInput: boolean;
   errorOnFailed: boolean;
+  multilineMode?: boolean;
 };
 
 export class ExtractRegexNodeImpl extends NodeImpl<ExtractRegexNode> {
-  static create(regex: string = '([a-zA-Z]+)'): ExtractRegexNode {
+  static create(): ExtractRegexNode {
     const chartNode: ExtractRegexNode = {
       type: 'extractRegex',
       title: 'Extract Regex',
@@ -27,7 +35,7 @@ export class ExtractRegexNodeImpl extends NodeImpl<ExtractRegexNode> {
         width: 250,
       },
       data: {
-        regex,
+        regex: '([a-zA-Z]+)',
         useRegexInput: false,
         errorOnFailed: false,
       },
@@ -43,6 +51,7 @@ export class ExtractRegexNodeImpl extends NodeImpl<ExtractRegexNode> {
         title: 'Input',
         dataType: 'string',
         required: true,
+        coerced: false,
       },
     ];
 
@@ -52,6 +61,7 @@ export class ExtractRegexNodeImpl extends NodeImpl<ExtractRegexNode> {
         title: 'Regex',
         dataType: 'string',
         required: false,
+        coerced: false,
       });
     }
 
@@ -107,6 +117,11 @@ export class ExtractRegexNodeImpl extends NodeImpl<ExtractRegexNode> {
         dataKey: 'errorOnFailed',
       },
       {
+        type: 'toggle',
+        label: 'Multiline mode',
+        dataKey: 'multilineMode',
+      },
+      {
         type: 'code',
         label: 'Regex',
         dataKey: 'regex',
@@ -137,7 +152,7 @@ export class ExtractRegexNodeImpl extends NodeImpl<ExtractRegexNode> {
     const inputString = expectType(inputs['input' as PortId], 'string');
     const regex = expectTypeOptional(inputs['regex' as PortId], 'string') ?? this.chartNode.data.regex;
 
-    const regExp = new RegExp(regex, 'g');
+    const regExp = new RegExp(regex, this.data.multilineMode ? 'gm' : 'g');
 
     let matches = [];
     let match;

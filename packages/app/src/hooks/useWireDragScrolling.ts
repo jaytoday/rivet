@@ -1,5 +1,5 @@
 import { useRecoilState, useRecoilValue } from 'recoil';
-import { canvasPositionState, draggingWireState, lastMousePositionState } from '../state/graphBuilder';
+import { canvasPositionState, draggingWireState } from '../state/graphBuilder';
 import { useViewportBounds } from './useViewportBounds';
 import { useCanvasPositioning } from './useCanvasPositioning';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -10,17 +10,28 @@ export function useWireDragScrolling() {
   const viewport = useViewportBounds();
   const { clientToCanvasPosition } = useCanvasPositioning();
   const [canvasPosition, setCanvasPosition] = useRecoilState(canvasPositionState);
+  const draggingWireLatest = useLatest(draggingWire);
 
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
+    const onMouseDown = (e: MouseEvent) => {
       setMousePosition({ x: e.clientX, y: e.clientY });
     };
 
+    const onMouseMove = (e: MouseEvent) => {
+      if (!draggingWireLatest.current) {
+        return;
+      }
+      setMousePosition({ x: e.clientX, y: e.clientY });
+    };
+
+    window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
-    return () => window.removeEventListener('mousemove', onMouseMove);
-  }, []);
-  const latestMousePosition = useLatest(mousePosition);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+    };
+  }, [draggingWireLatest]);
   const latestCanvasPosition = useLatest(canvasPosition);
 
   // If the mouse is within 10% of the edge of the viewport, then we'll start moving it
@@ -84,5 +95,8 @@ export function useWireDragScrolling() {
     isMouseNearBottomEdge,
     isMouseNearRightEdge,
     isMouseNearTopEdge,
+    nearLatest,
+    setCanvasPosition,
+    latestCanvasPosition,
   ]);
 }

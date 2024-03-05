@@ -1,26 +1,26 @@
 import { DefaultValue, atom, selector, selectorFamily } from 'recoil';
 import {
-  ChartNode,
-  NodeConnection,
-  NodeGraph,
-  NodeId,
-  NodeImpl,
-  NodeInputDefinition,
-  NodeOutputDefinition,
-  PortId,
+  type ChartNode,
+  type NodeConnection,
+  type NodeGraph,
+  type NodeId,
+  type NodeImpl,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
   emptyNodeGraph,
   globalRivetNodeRegistry,
 } from '@ironclad/rivet-core';
 import { recoilPersist } from 'recoil-persist';
 import { mapValues } from 'lodash-es';
 import { projectState } from './savedGraphs';
+import { pluginRefreshCounterState } from './plugins';
 
 const { persistAtom } = recoilPersist({ key: 'graph' });
 
 export const graphState = atom<NodeGraph>({
   key: 'graphState',
   default: emptyNodeGraph(),
-  effects_UNSTABLE: [persistAtom],
+  effects: [persistAtom],
 });
 
 export const graphMetadataState = selector({
@@ -71,10 +71,13 @@ export const connectionsState = selector({
 export const nodesByIdState = selector({
   key: 'nodesByIdState',
   get: ({ get }) => {
-    return get(nodesState).reduce((acc, node) => {
-      acc[node.id] = node;
-      return acc;
-    }, {} as Record<NodeId, ChartNode>);
+    return get(nodesState).reduce(
+      (acc, node) => {
+        acc[node.id] = node;
+        return acc;
+      },
+      {} as Record<NodeId, ChartNode>,
+    );
   },
 });
 
@@ -92,14 +95,17 @@ export const nodesForConnectionState = selector({
 export const connectionsForNodeState = selector({
   key: 'connectionsForNodeSelector',
   get: ({ get }) => {
-    return get(connectionsState).reduce((acc, connection) => {
-      acc[connection.inputNodeId] ??= [];
-      acc[connection.inputNodeId]!.push(connection);
+    return get(connectionsState).reduce(
+      (acc, connection) => {
+        acc[connection.inputNodeId] ??= [];
+        acc[connection.inputNodeId]!.push(connection);
 
-      acc[connection.outputNodeId] ??= [];
-      acc[connection.outputNodeId]!.push(connection);
-      return acc;
-    }, {} as Record<NodeId, NodeConnection[]>);
+        acc[connection.outputNodeId] ??= [];
+        acc[connection.outputNodeId]!.push(connection);
+        return acc;
+      },
+      {} as Record<NodeId, NodeConnection[]>,
+    );
   },
 });
 
@@ -128,6 +134,7 @@ export const nodeInstancesState = selector<Record<NodeId, NodeImpl<ChartNode, st
   key: 'nodeInstances',
   get: ({ get }) => {
     const nodesById = get(nodesByIdState);
+    get(pluginRefreshCounterState);
 
     return mapValues(nodesById, (node) => {
       try {
@@ -194,4 +201,13 @@ export const ioDefinitionsForNodeState = selectorFamily<
     ({ get }) => {
       return nodeId ? get(ioDefinitionsState)[nodeId]! : { inputDefinitions: [], outputDefinitions: [] };
     },
+});
+
+export const nodeConstructorsState = selector({
+  key: 'nodeConstructorsState',
+  get: ({ get }) => {
+    get(pluginRefreshCounterState);
+
+    return globalRivetNodeRegistry.getNodeConstructors();
+  },
 });

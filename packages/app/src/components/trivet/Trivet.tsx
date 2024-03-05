@@ -1,24 +1,24 @@
 import { useRecoilState } from 'recoil';
 import { trivetState } from '../../state/trivet';
-import { FC, useCallback, useMemo } from 'react';
+import { type FC, useCallback, useMemo } from 'react';
 import { css } from '@emotion/react';
 import Button from '@atlaskit/button';
 import { TestSuiteList } from './TestSuiteList';
 import { TestSuiteRenderer } from './TestSuite';
-import { nanoid } from 'nanoid';
-import { TryRunTests } from './api';
+import { nanoid } from 'nanoid/non-secure';
+import { type TryRunTests } from './api';
 import { overlayOpenState } from '../../state/ui';
 import { NoTestSuitesSplash } from './NoTestSuitesSplash';
 
 const styles = css`
   position: fixed;
-  top: 0;
+  top: var(--project-selector-height);
   left: 0;
   right: 0;
   bottom: 0;
   background-color: var(--grey-darker);
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
-  z-index: 60;
+  z-index: 150;
 
   .close-trivet {
     position: absolute;

@@ -1,15 +1,21 @@
 import {
-  DataValue,
-  NativeApi,
-  BaseDir,
-  ReadDirOptions,
+  type DataValue,
+  type NativeApi,
+  type BaseDir,
+  type ReadDirOptions,
   GraphProcessor,
-  Settings,
-  GraphOutputNode,
+  type Settings,
+  type GraphOutputNode,
   inferType,
+  DEFAULT_CHAT_NODE_TIMEOUT,
 } from '@ironclad/rivet-core';
 import { cloneDeep, keyBy, mapValues, omit } from 'lodash-es';
-import { TrivetGraphRunner, TrivetOpts, TrivetResults, TrivetTestCaseResult } from './trivetTypes.js';
+import {
+  type TrivetGraphRunner,
+  type TrivetOpts,
+  type TrivetResults,
+  type TrivetTestCaseResult,
+} from './trivetTypes.js';
 
 const TRUTHY_STRINGS = new Set(['true', 'TRUE']);
 
@@ -37,11 +43,15 @@ export class DummyNativeApi implements NativeApi {
   writeTextFile(path: string, data: string, baseDir?: BaseDir | undefined): Promise<void> {
     throw new Error('Method not implemented.');
   }
+  exec(command: string, args: string[], options?: { cwd?: string | undefined } | undefined): Promise<void> {
+    throw new Error('Method not implemented.');
+  }
 }
 
-export function createTestGraphRunner(opts: { openAiKey: string }): TrivetGraphRunner {
+export function createTestGraphRunner(opts: { openAiKey: string; executor?: 'nodejs' | 'browser' }): TrivetGraphRunner {
   return async (project, graphId, inputs) => {
     const processor = new GraphProcessor(project, graphId);
+    processor.executor = opts.executor;
     const resolvedContextValues: Record<string, DataValue> = {};
     const outputs = await processor.processGraph(
       {
@@ -49,9 +59,12 @@ export function createTestGraphRunner(opts: { openAiKey: string }): TrivetGraphR
         settings: {
           openAiKey: opts.openAiKey,
           openAiOrganization: '',
+          openAiEndpoint: '',
           pluginEnv: {},
           pluginSettings: {},
           recordingPlaybackLatency: 1000,
+          chatNodeHeaders: {},
+          chatNodeTimeout: DEFAULT_CHAT_NODE_TIMEOUT,
         } satisfies Required<Settings>,
       },
       inputs,
@@ -140,42 +153,40 @@ export async function runTrivet(opts: TrivetOpts): Promise<TrivetResults> {
             'cost',
           );
 
-          console.dir({ validationOutputs });
-          const validationResults = Object.entries(validationOutputs)
-            .map(([outputId, result]) => {
-              const node = validationOutputNodesById[outputId];
-              if (node === undefined) {
-                throw new Error('Missing node for validation');
-              }
-              const valid = validateOutput(result);
-              return {
-                id: node.id,
-                title: node.title ?? 'Validation',
-                description: node.description ?? 'It should be valid.',
-                valid,
-              };
-            });
-            testCaseResults.push({
-              id: testCase.id,
-              iteration: i + 1,
-              passing: validationResults.every((r) => r.valid),
-              message: validationResults.find((r) => !r.valid)?.description ?? 'PASS',
-              outputs: mapValues(omit(outputs, 'cost'), (dataValue) => dataValue.value),
-              duration,
-              cost,
-            });
-          } catch (err) {
-            testCaseResults.push({
-              id: testCase.id,
-              iteration: i + 1,
-              passing: false,
-              message: 'An error occurred',
-              outputs: {},
-              duration: 0,
-              cost: 0,
-              error: err,
-            });
-          }
+          const validationResults = Object.entries(validationOutputs).map(([outputId, result]) => {
+            const node = validationOutputNodesById[outputId];
+            if (node === undefined) {
+              throw new Error('Missing node for validation');
+            }
+            const valid = validateOutput(result);
+            return {
+              id: node.id,
+              title: node.title ?? 'Validation',
+              description: node.description ?? 'It should be valid.',
+              valid,
+            };
+          });
+          testCaseResults.push({
+            id: testCase.id,
+            iteration: i + 1,
+            passing: validationResults.every((r) => r.valid),
+            message: validationResults.find((r) => !r.valid)?.description ?? 'PASS',
+            outputs: mapValues(omit(outputs, 'cost'), (dataValue) => dataValue.value),
+            duration,
+            cost,
+          });
+        } catch (err) {
+          testCaseResults.push({
+            id: testCase.id,
+            iteration: i + 1,
+            passing: false,
+            message: 'An error occurred',
+            outputs: {},
+            duration: 0,
+            cost: 0,
+            error: err,
+          });
+        }
 
         let existingTestSuite = trivetResults.testSuiteResults.find((ts) => ts.id === testSuite.id);
         if (existingTestSuite == null) {

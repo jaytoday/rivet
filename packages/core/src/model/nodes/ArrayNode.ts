@@ -1,11 +1,20 @@
-import { ChartNode, NodeConnection, NodeId, NodeInputDefinition, NodeOutputDefinition, PortId } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { Inputs, Outputs } from '../GraphProcessor.js';
+import {
+  type ChartNode,
+  type NodeConnection,
+  type NodeId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+  type PortId,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeBody, type NodeUIData } from '../NodeImpl.js';
+import { type Inputs, type Outputs } from '../GraphProcessor.js';
 import { entries } from '../../utils/typeSafety.js';
 import { flattenDeep } from 'lodash-es';
 import { dedent } from 'ts-dedent';
-import { EditorDefinition } from '../EditorDefinition.js';
+import { type EditorDefinition } from '../EditorDefinition.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import type { RivetUIContext } from '../RivetUIContext.js';
 
 export type ArrayNode = ChartNode<'array', ArrayNodeData>;
 
@@ -43,6 +52,8 @@ export class ArrayNodeImpl extends NodeImpl<ArrayNode> {
         dataType: 'any',
         id: `input${i}` as PortId,
         title: `Input ${i}`,
+        description:
+          'An input to create the array from. If an array, will be flattened if the "Flatten" option is enabled.',
       });
     }
 
@@ -55,16 +66,20 @@ export class ArrayNodeImpl extends NodeImpl<ArrayNode> {
         dataType: 'any[]',
         id: 'output' as PortId,
         title: 'Output',
+        description: 'The array created from the inputs.',
       },
       {
         dataType: 'number[]',
         id: 'indices' as PortId,
         title: 'Indices',
+        description:
+          'The indices of the array. I.e. [0, 1, 2, 3, etc]. Useful for zipping with the output array to get the indexes.',
       },
       {
         dataType: 'number',
         id: 'length' as PortId,
         title: 'Length',
+        description: 'The length of the output array.',
       },
     ];
   }
@@ -110,6 +125,12 @@ export class ArrayNodeImpl extends NodeImpl<ArrayNode> {
       contextMenuTitle: 'Array',
       group: ['Lists'],
     };
+  }
+
+  getBody(): NodeBody {
+    return dedent`
+      ${this.data.flatten ? (this.data.flattenDeep ? 'Flatten (Deep)' : 'Flatten') : 'No Flatten'}
+    `;
   }
 
   async process(inputs: Inputs): Promise<Outputs> {

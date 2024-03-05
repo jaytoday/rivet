@@ -1,16 +1,19 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import {
-  GraphId,
-  GraphProcessor,
-  Project,
+  type GraphId,
+  type GraphProcessor,
+  type Project,
   getError,
-  Settings,
-  GraphInputs,
-  NodeId,
-  StringArrayDataValue,
+  type Settings,
+  type GraphInputs,
+  type NodeId,
+  type StringArrayDataValue,
+  type DataId,
+  type DataValue,
 } from '@ironclad/rivet-core';
 import { match } from 'ts-pattern';
 import Emittery from 'emittery';
+import { type DebuggerDatasetProvider } from './index.js';
 
 export interface RivetDebuggerServer {
   on: Emittery<DebuggerEvents>['on'];
@@ -38,6 +41,7 @@ export type DynamicGraphRunOptions = {
   graphId: GraphId;
   inputs?: GraphInputs;
   runToNodeIds?: NodeId[];
+  contextValues: Record<string, DataValue>;
 };
 
 export type DynamicGraphRun = (data: DynamicGraphRunOptions) => Promise<void>;
@@ -46,41 +50,75 @@ export function startDebuggerServer(
   options: {
     getClientsForProcessor?: (processor: GraphProcessor, allClients: WebSocket[]) => WebSocket[];
     getProcessorsForClient?: (client: WebSocket, allProcessors: GraphProcessor[]) => GraphProcessor[];
+    datasetProvider?: DebuggerDatasetProvider;
     server?: WebSocketServer;
     port?: number;
     dynamicGraphRun?: DynamicGraphRun;
     allowGraphUpload?: boolean;
+    throttlePartialOutputs?: number;
+    host?: string;
   } = {},
 ): RivetDebuggerServer {
-  const { port = 21888 } = options;
+  const { port = 21888, throttlePartialOutputs = 100, host = 'localhost' } = options;
 
-  const server = options.server ?? new WebSocketServer({ port });
+  const server = options.server ?? new WebSocketServer({ port, host });
 
   const emitter = new Emittery<DebuggerEvents>();
 
   const attachedProcessors: GraphProcessor[] = [];
 
   server.on('connection', (socket) => {
+    if (options.datasetProvider) {
+      options.datasetProvider.onrequest = (type, data) => {
+        socket.send(
+          JSON.stringify({
+            message: type,
+            data,
+          }),
+        );
+      };
+    }
+
     socket.on('message', async (data) => {
       try {
+        const stringData = data.toString();
+
+        if (stringData.startsWith('set-static-data:')) {
+          const [, id, value] = stringData.split(':');
+
+          if (currentDebuggerState.uploadedProject) {
+            currentDebuggerState.uploadedProject.data ??= {};
+            currentDebuggerState.uploadedProject.data![id as DataId] = value!;
+          }
+          return;
+        }
+
         const message = JSON.parse(data.toString()) as { type: string; data: unknown };
 
         await match(message)
           .with({ type: 'run' }, async () => {
-            const { graphId, inputs, runToNodeIds } = message.data as {
+            const { graphId, inputs, runToNodeIds, contextValues } = message.data as {
               graphId: GraphId;
               inputs: GraphInputs;
               runToNodeIds?: NodeId[];
+              contextValues: Record<string, DataValue>;
             };
 
-            await options.dynamicGraphRun?.({ client: socket, graphId, inputs, runToNodeIds });
+            await options.dynamicGraphRun?.({ client: socket, graphId, inputs, runToNodeIds, contextValues });
           })
           .with({ type: 'set-dynamic-data' }, async () => {
             if (options.allowGraphUpload) {
-              const { project, settings } = message.data as { project: Project; settings: Settings };
+              const { project, settings, datasets } = message.data as {
+                project: Project;
+                settings: Settings;
+                datasets: string;
+              };
               currentDebuggerState.uploadedProject = project;
               currentDebuggerState.settings = settings;
             }
+          })
+          .with({ type: 'datasets:response' }, async () => {
+            options.datasetProvider?.handleResponse(message.type, message.data as any);
           })
           .otherwise(async () => {
             const processors = options.getProcessorsForClient?.(socket, attachedProcessors) ?? attachedProcessors;
@@ -146,6 +184,7 @@ export function startDebuggerServer(
         return;
       }
 
+      const lastPartialOutputsTimePerNode: Record<NodeId, number> = {};
       attachedProcessors.push(processor);
 
       processor.on('nodeStart', (data) => {
@@ -175,14 +214,21 @@ export function startDebuggerServer(
       processor.on('nodeExcluded', (data) => {
         this.broadcast(processor, 'nodeExcluded', data);
       });
-      processor.on('start', () => {
-        this.broadcast(processor, 'start', null);
+      processor.on('start', (data) => {
+        this.broadcast(processor, 'start', data);
       });
       processor.on('done', (data) => {
         this.broadcast(processor, 'done', data);
       });
       processor.on('partialOutput', (data) => {
-        this.broadcast(processor, 'partialOutput', data);
+        // Throttle the partial outputs because they can get ridiculous on the serdes side
+        if (
+          lastPartialOutputsTimePerNode[data.node.id] == null ||
+          (lastPartialOutputsTimePerNode[data.node.id] ?? 0) + throttlePartialOutputs < Date.now()
+        ) {
+          this.broadcast(processor, 'partialOutput', data);
+          lastPartialOutputsTimePerNode[data.node.id] = Date.now();
+        }
       });
       processor.on('abort', () => {
         this.broadcast(processor, 'abort', null);

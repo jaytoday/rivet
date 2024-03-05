@@ -1,6 +1,6 @@
-import { PortId, NodeId } from '@ironclad/rivet-core';
-import { useState, useLayoutEffect, useRef } from 'react';
-import { PortPositions } from '../components/NodeCanvas';
+import { type PortId, type NodeId } from '@ironclad/rivet-core';
+import { useState, useLayoutEffect, useRef, useCallback } from 'react';
+import { type PortPositions } from '../components/NodeCanvas';
 import { useRecoilValue } from 'recoil';
 import { nodesByIdState } from '../state/graph';
 
@@ -15,7 +15,7 @@ export function useNodePortPositions() {
   const nodesById = useRecoilValue(nodesByIdState);
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  useLayoutEffect(() => {
+  const recalculate = useCallback(() => {
     // Lot of duplication but meh
     const normalPortElements = canvasRef.current?.querySelectorAll(
       '.node:not(.overlayNode) .port-circle',
@@ -28,7 +28,8 @@ export function useNodePortPositions() {
     for (const elem of normalPortElements) {
       const portId = elem.dataset.portid! as PortId;
       const nodeId = elem.dataset.nodeid! as NodeId;
-      const key = `${nodeId}-${portId}`;
+      const portType = elem.dataset.porttype! as 'input' | 'output';
+      const key = `${nodeId}-${portType}-${portId}`;
 
       if (seen.has(key)) {
         return;
@@ -72,7 +73,8 @@ export function useNodePortPositions() {
 
       const portId = elem.dataset.portid! as PortId;
       const nodeId = elem.dataset.nodeid! as NodeId;
-      const key = `${nodeId}-${portId}`;
+      const portType = elem.dataset.porttype! as 'input' | 'output';
+      const key = `${nodeId}-${portType}-${portId}`;
 
       if (seen.has(key)) {
         return;
@@ -119,7 +121,11 @@ export function useNodePortPositions() {
     if (changed) {
       setNodePortPositions(newPositions);
     }
+  }, [nodePortPositions, nodesById]);
+
+  useLayoutEffect(() => {
+    recalculate();
   });
 
-  return { nodePortPositions, canvasRef };
+  return { nodePortPositions, canvasRef, recalculate };
 }

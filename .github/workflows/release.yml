@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - windows-builds
     tags:
       - app-v*
 jobs:
@@ -9,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     strategy:
       matrix:
-        platform: [macos-latest, ubuntu-20.04]
+        platform: [windows-latest, macos-latest, ubuntu-20.04]
       fail-fast: false
     steps:
       - uses: actions/checkout@v3
@@ -34,6 +36,8 @@ jobs:
         run: yarn --immutable
       - name: Build Rivet
         run: yarn build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6000
       - name: Build Tauri App
         uses: tauri-apps/tauri-action@v0
         with:
@@ -55,3 +59,5 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NODE_OPTIONS: --max-old-space-size=6000

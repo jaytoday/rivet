@@ -1,9 +1,9 @@
 import Button from '@atlaskit/button';
 import { css } from '@emotion/react';
-import { ChangeEvent, FC, useEffect, useState, useRef, useLayoutEffect } from 'react';
+import { type ChangeEvent, type FC, useEffect, useState, useRef, useLayoutEffect } from 'react';
 import { atom, useRecoilState, useRecoilValue } from 'recoil';
 import {
-  PromptDesignerTestGroupResults,
+  type PromptDesignerTestGroupResults,
   promptDesignerAttachedChatNodeState,
   promptDesignerConfigurationState,
   promptDesignerMessagesState,
@@ -14,18 +14,16 @@ import {
 import { nodesByIdState, nodesState } from '../state/graph.js';
 import { lastRunDataByNodeState } from '../state/dataFlow.js';
 import {
-  ChatMessage,
-  ChatNode,
-  ChatNodeConfigData,
+  type ChatMessage,
+  type ChatNode,
+  type ChatNodeConfigData,
   ChatNodeImpl,
-  GraphId,
+  type GraphId,
   GraphProcessor,
-  InternalProcessContext,
-  NodeId,
-  NodeTestGroup,
-  PortId,
-  ProcessId,
-  Settings,
+  type InternalProcessContext,
+  type NodeId,
+  type NodeTestGroup,
+  type PortId,
   arrayizeDataValue,
   coerceType,
   coerceTypeOptional,
@@ -39,10 +37,9 @@ import { Field } from '@atlaskit/form';
 import Tabs, { Tab, TabList, TabPanel } from '@atlaskit/tabs';
 import Select from '@atlaskit/select';
 import Toggle from '@atlaskit/toggle';
-import { nanoid } from 'nanoid';
+import { nanoid } from 'nanoid/non-secure';
 import { TauriNativeApi } from '../model/native/TauriNativeApi.js';
 import { settingsState } from '../state/settings.js';
-import { GraphSelector } from './DefaultNodeEditor.js';
 import TextArea from '@atlaskit/textarea';
 import { projectState } from '../state/savedGraphs.js';
 import { cloneDeep, findIndex, mapValues, range, zip } from 'lodash-es';
@@ -50,16 +47,19 @@ import { useStableCallback } from '../hooks/useStableCallback.js';
 import { toast } from 'react-toastify';
 import { produce } from 'immer';
 import { overlayOpenState } from '../state/ui';
+import { datasetProvider } from '../utils/globals';
+import { GraphSelector } from './editors/GraphSelectorEditor';
+import { useGetAdHocInternalProcessContext } from '../hooks/useGetAdHocInternalProcessContext';
 
 const styles = css`
   position: fixed;
-  top: 0;
+  top: var(--project-selector-height);
   left: 0;
   right: 0;
   bottom: 0;
   background-color: var(--grey-darker);
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
-  z-index: 60;
+  z-index: 150;
 
   .close-prompt-designer {
     position: absolute;
@@ -394,7 +394,7 @@ export const PromptDesigner: FC<PromptDesignerProps> = ({ onClose }) => {
   const addMessage = useStableCallback((index: number) => {
     setMessages((s) =>
       produce(s, (draft) => {
-        draft.messages.splice(index + 1, 0, { type: 'user', message: '', function_call: undefined, name: undefined });
+        draft.messages.splice(index + 1, 0, { type: 'user', message: '' });
       }),
     );
   });
@@ -447,10 +447,10 @@ export const PromptDesigner: FC<PromptDesignerProps> = ({ onClose }) => {
 
   const resultsForAttachedNode = testGroupResultsByNodeId[attachedNodeId?.nodeId ?? ''];
 
-  const settings = useRecoilValue(settingsState);
-
   const abortController = useRef<AbortController>();
   const [inProgress, setInProgress] = useState(false);
+
+  const getAdHocInternalProcessContext = useGetAdHocInternalProcessContext();
 
   const tryRunSingle = async () => {
     try {
@@ -463,16 +463,16 @@ export const PromptDesigner: FC<PromptDesignerProps> = ({ onClose }) => {
         setTestGroupResultsByNodeId((s) => ({ ...s, [attachedNodeId.nodeId]: [] }));
       }
 
-      const response = await runAdHocChat(messages, {
-        data: config.data,
-        signal: abortController.current.signal,
-        settings,
-        onPartialResult: (partialResult) => {
-          setResponse({
-            response: partialResult,
-          });
-        },
-      });
+      const response = await runAdHocChat(
+        messages,
+        config.data,
+        await getAdHocInternalProcessContext({
+          onPartialResult: (partialResult) => {
+            setResponse({ response: partialResult });
+          },
+          signal: abortController.current.signal,
+        }),
+      );
 
       setResponse({
         response,
@@ -502,18 +502,14 @@ export const PromptDesigner: FC<PromptDesignerProps> = ({ onClose }) => {
         messages,
         promptDesigner.samples,
         {
-          data: config.data,
-          settings,
-          signal: abortController.current.signal,
-        },
-        {
-          onPartialResults: (partialResult) => {
+          onPartialResults: (partialResults) => {
             setTestGroupResultsByNodeId((s) => ({
               ...s,
-              [attachedNodeId.nodeId]: partialResult,
+              [attachedNodeId.nodeId]: partialResults,
             }));
           },
         },
+        config.data,
       );
     } catch (err) {
       console.error(getError(err));
@@ -771,7 +767,7 @@ const PromptDesignerMessage: FC<{
     onChange({
       ...message,
       type: nextMessageType,
-    });
+    } as ChatMessage);
   });
 
   const onTextChange = useStableCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
@@ -793,6 +789,8 @@ const PromptDesignerMessage: FC<{
     }
   }, [message?.message]);
 
+  const stringMessage = coerceType({ type: 'chat-message', value: message }, 'string');
+
   return (
     <div className="message">
       <div className="message-author-type">
@@ -804,7 +802,7 @@ const PromptDesignerMessage: FC<{
         <textarea
           autoFocus
           className="message-editor"
-          value={message?.message ?? ''}
+          value={stringMessage}
           onClick={(e) => e.stopPropagation()}
           onChange={onTextChange}
           ref={textareaRef}
@@ -939,16 +937,7 @@ export const PromptDesignerTestGroupResult: FC<{
   );
 };
 
-type AdHocChatConfig = {
-  data: ChatNodeConfigData;
-  signal: AbortSignal;
-  settings: Settings;
-  onPartialResult?: (response: string) => void;
-};
-
-async function runAdHocChat(messages: ChatMessage[], config: AdHocChatConfig) {
-  const { data, signal, settings, onPartialResult } = config;
-
+async function runAdHocChat(messages: ChatMessage[], data: ChatNodeConfigData, context: InternalProcessContext) {
   const chatNode = new ChatNodeImpl({
     data: {
       ...data,
@@ -980,33 +969,7 @@ async function runAdHocChat(messages: ChatMessage[], config: AdHocChatConfig) {
           value: messages,
         },
       },
-      {
-        contextValues: {},
-        createSubProcessor: undefined!,
-        settings,
-        nativeApi: new TauriNativeApi(),
-        processId: nanoid() as ProcessId,
-        executionCache: new Map(),
-        externalFunctions: {},
-        getGlobal: undefined!,
-        graphInputs: {},
-        graphOutputs: {},
-        project: undefined!,
-        raiseEvent: undefined!,
-        setGlobal: undefined!,
-        signal,
-        trace: (value) => console.log(value),
-        waitEvent: undefined!,
-        waitForGlobal: undefined!,
-        onPartialOutputs: (outputs) => {
-          const responsePartial = coerceTypeOptional(outputs['response' as PortId], 'string');
-          if (responsePartial) {
-            onPartialResult?.(responsePartial);
-          }
-        },
-        abortGraph: undefined!,
-        getPluginConfig: undefined!,
-      } as InternalProcessContext,
+      context,
     );
 
     const response = coerceTypeOptional(result['response' as PortId], 'string');
@@ -1024,11 +987,13 @@ function useRunTestGroup() {
   return async (
     testGroup: NodeTestGroup,
     messages: ChatMessage[],
-    config: AdHocChatConfig,
+    data: ChatNodeConfigData,
+    context: InternalProcessContext,
   ): Promise<PromptDesignerTestGroupResults> => {
-    const response = await runAdHocChat(messages, config);
+    const response = await runAdHocChat(messages, data, context);
 
     const processor = new GraphProcessor(project, testGroup.evaluatorGraphId);
+    processor.executor = 'browser';
 
     processor.on('trace', (value) => console.log(value));
 
@@ -1041,6 +1006,7 @@ function useRunTestGroup() {
     const outputs = await processor.processGraph(
       {
         nativeApi: new TauriNativeApi(),
+        datasetProvider,
         settings,
       },
       {
@@ -1087,15 +1053,16 @@ function useRunTestGroup() {
 
 function useRunTestGroupSampleCount() {
   const runTestGroup = useRunTestGroup();
+  const getAdHocInternalProcessContext = useGetAdHocInternalProcessContext();
 
   return async (
     testGroup: NodeTestGroup,
     messages: ChatMessage[],
     sampleCount: number,
-    config: AdHocChatConfig,
     options: {
       onPartialResults?: (data: PromptDesignerTestGroupResults[]) => void;
     } = {},
+    data: ChatNodeConfigData,
   ): Promise<PromptDesignerTestGroupResults[]> => {
     const { onPartialResults } = options;
 
@@ -1111,13 +1078,17 @@ function useRunTestGroupSampleCount() {
           results: [],
         };
 
-        const caseResults = await runTestGroup(testGroup, messages, {
-          ...config,
-          onPartialResult: (response) => {
-            results[sampleIndex]!.response = response;
-            onPartialResults?.(cloneDeep(results));
-          },
-        });
+        const caseResults = await runTestGroup(
+          testGroup,
+          messages,
+          data,
+          await getAdHocInternalProcessContext({
+            onPartialResult: (response) => {
+              results[sampleIndex]!.response = response;
+              onPartialResults?.(cloneDeep(results));
+            },
+          }),
+        );
 
         results[sampleIndex]!.results = caseResults.results;
 

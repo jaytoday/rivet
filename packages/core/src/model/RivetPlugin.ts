@@ -1,16 +1,20 @@
-import { ChartNode } from './NodeBase.js';
-import { NodeDefinition } from './NodeImpl.js';
+import { type ChartNode } from './NodeBase.js';
+import type { PluginNodeDefinition } from './NodeDefinition.js';
 
 export type RivetPlugin = {
+  /** The unique identifier of the plugin. Should be unique across all plugins. */
   id: string;
 
+  /** The display name of the plugin - what is shown in the UI fr the plugin. */
   name?: string;
 
-  register?: (register: <T extends ChartNode>(definition: NodeDefinition<T>) => void) => void;
+  /** Registers new nodes for the plugin to add. */
+  register?: (register: <T extends ChartNode>(definition: PluginNodeDefinition<T>) => void) => void;
 
   /** The available configuration items and their specification, for configuring a plugin in the UI. */
   configSpec?: RivetPluginConfigSpecs;
 
+  /** Defines additional context menu groups that the plugin adds. */
   contextMenuGroups?: Array<{
     id: string;
     label: string;

@@ -1,38 +1,64 @@
-import { DndContext, DragEndEvent, DragOverEvent, DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core';
+import {
+  DndContext,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+  useDraggable,
+  useDroppable,
+} from '@dnd-kit/core';
 import { css } from '@emotion/react';
-import { CSSProperties, FC, useState, useMemo, FocusEvent, MouseEvent, KeyboardEvent, useEffect, memo } from 'react';
-import { useRecoilState, useRecoilValue } from 'recoil';
+import {
+  type CSSProperties,
+  type FC,
+  useState,
+  useMemo,
+  type FocusEvent,
+  type MouseEvent,
+  type KeyboardEvent,
+  memo,
+} from 'react';
+import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
 import { graphState } from '../state/graph.js';
-import { savedGraphsState } from '../state/savedGraphs.js';
+import { projectMetadataState, savedGraphsState } from '../state/savedGraphs.js';
 import { orderBy, range } from 'lodash-es';
 import { DropdownItem } from '@atlaskit/dropdown-menu';
 import { useDeleteGraph } from '../hooks/useDeleteGraph.js';
 import { useLoadGraph } from '../hooks/useLoadGraph.js';
-import { GraphId, emptyNodeGraph } from '@ironclad/rivet-core';
+import { type GraphId, emptyNodeGraph, type NodeGraph } from '@ironclad/rivet-core';
 import clsx from 'clsx';
 import { LoadingSpinner } from './LoadingSpinner.js';
 import { runningGraphsState } from '../state/dataFlow.js';
 import { useDuplicateGraph } from '../hooks/useDuplicateGraph.js';
 import { useContextMenu } from '../hooks/useContextMenu.js';
 import Portal from '@atlaskit/portal';
-import { NodeGraph } from '@ironclad/rivet-core';
-import { ReactComponent as ArrowRightIcon } from 'majesticons/line/arrow-right-line.svg';
-import { ReactComponent as ArrowDownIcon } from 'majesticons/line/arrow-down-line.svg';
-import { ReactComponent as MenuLineIcon } from 'majesticons/line/menu-line.svg';
+import ArrowRightIcon from 'majesticons/line/arrow-right-line.svg?react';
+import ArrowDownIcon from 'majesticons/line/arrow-down-line.svg?react';
+import MenuLineIcon from 'majesticons/line/menu-line.svg?react';
+import CrossIcon from 'majesticons/line/multiply-line.svg?react';
 import { toast } from 'react-toastify';
 import { useStableCallback } from '../hooks/useStableCallback.js';
 import TextField from '@atlaskit/textfield';
+import { useFuseSearch } from '../hooks/useFuseSearch';
+import { useImportGraph } from '../hooks/useImportGraph';
+import { expandedFoldersState } from '../state/ui';
 
 const styles = css`
   display: flex;
   flex-direction: column;
   flex-shrink: 1;
   min-height: 100%;
-  margin-top: 8px;
+
+  .graph-list-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
 
   .graph-list {
     overflow-y: auto;
     overflow-x: hidden;
+    flex: 1 1 auto;
   }
 
   .graph-list,
@@ -102,6 +128,7 @@ const styles = css`
 
   .graph-list-spacer {
     min-height: 100px;
+    flex-grow: 1;
   }
 
   .dragging-over {
@@ -111,14 +138,60 @@ const styles = css`
   .dragging {
     opacity: 0.5;
   }
+
+  .search {
+    position: relative;
+
+    input {
+      width: 100%;
+      font-size: 12px;
+      background: var(--grey-darkerish);
+      border: 0;
+      border-bottom: 1px solid var(--grey);
+      padding: 8px 16px;
+
+      &:focus {
+        outline: 0;
+        border-bottom: 1px solid var(--primary);
+      }
+    }
+
+    .clear {
+      position: absolute;
+      right: 8px;
+      top: 6px;
+      width: 20px;
+      height: 20px;
+      background: var(--grey);
+      border: 1px solid var(--grey-dark);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+
+      &:hover {
+        background: var(--grey-lightish);
+      }
+
+      svg {
+        width: 12px;
+        height: 12px;
+      }
+    }
+  }
 `;
 
 const contextMenuStyles = css`
-  position: absolute;
   border: 1px solid var(--grey);
   box-shadow: 0 3px 5px rgba(0, 0, 0, 0.2);
   background: var(--grey-dark);
   min-width: max-content;
+
+  > button span {
+    // This fixes a bug in Ubuntu where the text is missing
+    overflow-x: visible !important;
+  }
 `;
 
 interface NodeGraphFolder {
@@ -238,9 +311,19 @@ function getFolderNames(folderedGraphs: NodeGraphFolderItem[]): string[] {
   return folderNames;
 }
 
-export const GraphList: FC = () => {
+export const GraphList: FC<{ onRunGraph?: (graphId: GraphId) => void }> = memo(({ onRunGraph }) => {
+  const projectMetadata = useRecoilValue(projectMetadataState);
   const [graph, setGraph] = useRecoilState(graphState);
   const [savedGraphs, setSavedGraphs] = useRecoilState(savedGraphsState);
+  const [searchText, setSearchText] = useState('');
+
+  const searchedGraphs = useFuseSearch(
+    savedGraphs,
+    searchText,
+    ['metadata.name' as keyof NodeGraph, 'metadata.description' as keyof NodeGraph],
+    {},
+  );
+  const filteredGraphs = useMemo(() => searchedGraphs.map((g) => g.item), [searchedGraphs]);
 
   // Track the graph that is being renamed, so that we can update the name when the user is done.
   const [renamingItemFullPath, setRenamingItemFullPath] = useState<string | undefined>();
@@ -251,7 +334,10 @@ export const GraphList: FC = () => {
   // Track folders on deletion or creation, so that empty folders aren't automatically deleted.
   const [folderNames, setFolderNames] = useState<string[]>([]);
 
-  const folderedGraphs = createFoldersFromGraphs(savedGraphs, folderNames);
+  const folderedGraphs = useMemo(
+    () => createFoldersFromGraphs(filteredGraphs, folderNames),
+    [filteredGraphs, folderNames],
+  );
 
   const runningGraphs = useRecoilValue(runningGraphsState);
 
@@ -259,6 +345,7 @@ export const GraphList: FC = () => {
   const loadGraph = useLoadGraph();
 
   const duplicateGraph = useDuplicateGraph();
+  const importGraph = useImportGraph();
 
   const handleNew = useStableCallback((folderPath?: string) => {
     const graph = emptyNodeGraph();
@@ -291,10 +378,16 @@ export const GraphList: FC = () => {
     startRename(graph.metadata!.name!);
   });
 
+  const setExpandedFolders = useSetRecoilState(expandedFoldersState);
+
   const handleNewFolder = useStableCallback((parentPath?: string) => {
     const newFolderPath = parentPath ? `${parentPath}/New Folder` : 'New Folder';
     setFolderNames((prev) => [...prev, newFolderPath]);
     startRename(newFolderPath);
+    setExpandedFolders((prev) => ({
+      ...prev,
+      [`${projectMetadata.id}/${newFolderPath}`]: true,
+    }));
   });
 
   const handleDelete = useStableCallback((graph: NodeGraph) => {
@@ -308,6 +401,13 @@ export const GraphList: FC = () => {
     );
     graphsToDelete.forEach((graph) => deleteGraph(graph));
     setFolderNames((prev) => prev.filter((name) => folderName !== name && !isInFolder(folderName, name)));
+  });
+
+  const runGraph = useStableCallback((folderName: string) => {
+    const graph = savedGraphs.find((graph) => graph.metadata?.name === folderName);
+    if (graph) {
+      onRunGraph?.(graph.metadata!.id!);
+    }
   });
 
   const startRename = useStableCallback((folderItemName: string) => {
@@ -357,12 +457,16 @@ export const GraphList: FC = () => {
       ),
     );
     setRenamingItemFullPath(undefined);
+    setExpandedFolders((prev) => ({
+      ...prev,
+      [`${projectMetadata.id}/${newFullPath}`]: prev[`${projectMetadata.id}/${fullPath}`] ?? false,
+    }));
   });
 
-  function handleDragStart(drag: DragStartEvent) {
+  const handleDragStart = useStableCallback((drag: DragStartEvent) => {
     const activeFullPath = drag.active?.id as string;
     setDraggingItemFullPath(activeFullPath);
-  }
+  });
 
   const handleDragEnd = useStableCallback((dragResult: DragEndEvent) => {
     setDragOverFolderName(undefined);
@@ -385,16 +489,17 @@ export const GraphList: FC = () => {
 
   const [dragOverFolderName, setDragOverFolderName] = useState<string | undefined>();
 
-  function handleDragOver(dragOver: DragOverEvent) {
+  const handleDragOver = useStableCallback((dragOver: DragOverEvent) => {
     const overFullPath = dragOver.over?.id as string;
     if (overFullPath == null) {
       setDragOverFolderName(undefined);
     } else {
       setDragOverFolderName(overFullPath.indexOf('/') > 0 ? overFullPath.replace(/\/[^/]*$/, '') : '');
     }
-  }
+  });
 
-  const { contextMenuRef, showContextMenu, contextMenuData, handleContextMenu } = useContextMenu();
+  const { setShowContextMenu, showContextMenu, contextMenuData, handleContextMenu, floatingStyles, refs } =
+    useContextMenu();
   const handleSidebarContextMenu = useStableCallback((e: MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     handleContextMenu(e);
@@ -408,85 +513,219 @@ export const GraphList: FC = () => {
     ? contextMenuData.data?.element.dataset.folderpath
     : undefined;
 
+  const handleSearchKeyDown = useStableCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      setSearchText('');
+      (e.target as HTMLElement).blur();
+    }
+  });
+
   return (
-    <div css={styles} ref={contextMenuRef} onContextMenu={handleSidebarContextMenu}>
-      <div className={clsx('graph-list', { 'dragging-over': dragOverFolderName === '' && draggingItemFolder !== '' })}>
-        <DndContext onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragStart={handleDragStart}>
-          {folderedGraphs.map((item) => (
-            <FolderItem
-              key={item.type === 'graph' ? item.graph.metadata?.id : item.fullPath}
-              item={item}
-              runningGraphs={runningGraphs}
-              renamingItemFullPath={renamingItemFullPath}
-              graph={graph}
-              dragOverFolderName={dragOverFolderName}
-              draggingItemFolder={draggingItemFolder}
-              depth={0}
-              onGraphSelected={loadGraph}
-              onRenameItem={renameFolderItem}
-            />
-          ))}
-          <GraphListSpacer />
-        </DndContext>
+    <div css={styles}>
+      <div className="search">
+        <input
+          autoComplete="off"
+          spellCheck={false}
+          type="text"
+          placeholder="Search..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          onKeyDown={handleSearchKeyDown}
+        />
+        {searchText.length > 0 && (
+          <button className="clear" onClick={() => setSearchText('')}>
+            <CrossIcon />
+          </button>
+        )}
+      </div>
+      <div className="graph-list-container" onContextMenu={handleSidebarContextMenu}>
+        <div
+          className={clsx('graph-list', { 'dragging-over': dragOverFolderName === '' && draggingItemFolder !== '' })}
+        >
+          <DndContext onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragStart={handleDragStart}>
+            {folderedGraphs.map((item) => (
+              <FolderItem
+                key={item.type === 'graph' ? item.graph.metadata?.id : item.fullPath}
+                item={item}
+                runningGraphs={runningGraphs}
+                renamingItemFullPath={renamingItemFullPath}
+                graph={graph}
+                dragOverFolderName={dragOverFolderName}
+                draggingItemFolder={draggingItemFolder}
+                depth={0}
+                onGraphSelected={loadGraph}
+                onRenameItem={renameFolderItem}
+              />
+            ))}
+            <GraphListSpacer />
+          </DndContext>
+          <Portal>
+            {showContextMenu && contextMenuData.data?.type === 'graph-item' && (
+              <div
+                className="graph-item-context-menu-pos"
+                ref={refs.setReference}
+                style={{
+                  zIndex: 500,
+                  position: 'absolute',
+                  left: contextMenuData.x,
+                  top: contextMenuData.y,
+                }}
+              >
+                <div
+                  className="graph-item-context-menu"
+                  css={contextMenuStyles}
+                  style={floatingStyles}
+                  ref={refs.setFloating}
+                >
+                  <DropdownItem
+                    onClick={() => {
+                      runGraph(selectedFolderNameForContextMenu!);
+                      setShowContextMenu(false);
+                    }}
+                  >
+                    Run
+                  </DropdownItem>
+                  <DropdownItem
+                    onClick={() => {
+                      startRename(selectedFolderNameForContextMenu!);
+                      setShowContextMenu(false);
+                    }}
+                  >
+                    Rename Graph
+                  </DropdownItem>
+                  <DropdownItem
+                    onClick={() => {
+                      duplicateGraph(selectedGraphForContextMenu!);
+                      setShowContextMenu(false);
+                    }}
+                  >
+                    Duplicate
+                  </DropdownItem>
+                  <DropdownItem
+                    onClick={() => {
+                      handleDelete(selectedGraphForContextMenu!);
+                      setShowContextMenu(false);
+                    }}
+                  >
+                    Delete
+                  </DropdownItem>
+                </div>
+              </div>
+            )}
+            {showContextMenu && contextMenuData.data?.type === 'graph-folder' && (
+              <div
+                className="graph-item-context-menu-pos"
+                ref={refs.setReference}
+                style={{
+                  zIndex: 500,
+                  position: 'absolute',
+                  left: contextMenuData.x,
+                  top: contextMenuData.y,
+                }}
+              >
+                <div
+                  className="graph-item-context-menu"
+                  css={contextMenuStyles}
+                  style={floatingStyles}
+                  ref={refs.setFloating}
+                >
+                  <DropdownItem
+                    onClick={() => {
+                      startRename(selectedFolderNameForContextMenu!);
+                      setShowContextMenu(false);
+                    }}
+                  >
+                    Rename Folder
+                  </DropdownItem>
+                  <DropdownItem
+                    onClick={() => {
+                      handleNew(selectedFolderNameForContextMenu!);
+                      setShowContextMenu(false);
+                    }}
+                  >
+                    New Graph
+                  </DropdownItem>
+                  <DropdownItem
+                    onClick={() => {
+                      handleNewFolder(selectedFolderNameForContextMenu!);
+                      setShowContextMenu(false);
+                    }}
+                  >
+                    New Folder
+                  </DropdownItem>
+                  <DropdownItem
+                    onClick={() => {
+                      handleDeleteFolder(selectedFolderNameForContextMenu!);
+                      setShowContextMenu(false);
+                    }}
+                  >
+                    Delete
+                  </DropdownItem>
+                </div>
+              </div>
+            )}
+          </Portal>
+        </div>
         <Portal>
-          {showContextMenu && contextMenuData.data?.type === 'graph-item' && (
+          {showContextMenu && contextMenuData.data?.type === 'graph-list' && (
             <div
-              className="graph-item-context-menu"
-              css={contextMenuStyles}
+              className="graph-list-context-menu-pos"
+              ref={refs.setReference}
               style={{
+                position: 'absolute',
                 zIndex: 500,
                 left: contextMenuData.x,
                 top: contextMenuData.y,
               }}
             >
-              <DropdownItem onClick={() => startRename(selectedFolderNameForContextMenu!)}>Rename Graph</DropdownItem>
-              <DropdownItem onClick={() => duplicateGraph(selectedGraphForContextMenu!)}>Duplicate</DropdownItem>
-              <DropdownItem onClick={() => handleDelete(selectedGraphForContextMenu!)}>Delete</DropdownItem>
-            </div>
-          )}
-          {showContextMenu && contextMenuData.data?.type === 'graph-folder' && (
-            <div
-              className="graph-item-context-menu"
-              css={contextMenuStyles}
-              style={{
-                zIndex: 500,
-                left: contextMenuData.x,
-                top: contextMenuData.y,
-              }}
-            >
-              <DropdownItem onClick={() => startRename(selectedFolderNameForContextMenu!)}>Rename Folder</DropdownItem>
-              <DropdownItem onClick={() => handleNew(selectedFolderNameForContextMenu!)}>New Graph</DropdownItem>
-              <DropdownItem onClick={() => handleNewFolder(selectedFolderNameForContextMenu!)}>New Folder</DropdownItem>
-              <DropdownItem onClick={() => handleDeleteFolder(selectedFolderNameForContextMenu!)}>Delete</DropdownItem>
+              <div
+                className="graph-list-context-menu"
+                css={contextMenuStyles}
+                style={floatingStyles}
+                ref={refs.setFloating}
+              >
+                <DropdownItem
+                  onClick={() => {
+                    handleNew();
+                    setShowContextMenu(false);
+                  }}
+                >
+                  New Graph
+                </DropdownItem>
+                <DropdownItem
+                  onClick={() => {
+                    handleNewFolder();
+                    setShowContextMenu(false);
+                  }}
+                >
+                  New Folder
+                </DropdownItem>
+                <DropdownItem
+                  onClick={() => {
+                    importGraph();
+                    setShowContextMenu(false);
+                  }}
+                >
+                  Import Graph...
+                </DropdownItem>
+              </div>
             </div>
           )}
         </Portal>
       </div>
-      <Portal>
-        {showContextMenu && contextMenuData.data?.type === 'graph-list' && (
-          <div
-            className="graph-list-context-menu"
-            css={contextMenuStyles}
-            style={{
-              zIndex: 500,
-              left: contextMenuData.x,
-              top: contextMenuData.y,
-            }}
-          >
-            <DropdownItem onClick={() => handleNew()}>New Graph</DropdownItem>
-            <DropdownItem onClick={() => handleNewFolder()}>New Folder</DropdownItem>
-          </div>
-        )}
-      </Portal>
     </div>
   );
-};
+});
+
+GraphList.displayName = 'GraphList';
 
 // Allows the bottom of the list to be a drop target
-export const GraphListSpacer: FC = () => {
+export const GraphListSpacer: FC = memo(() => {
   const { setNodeRef: setDroppableNodeRef } = useDroppable({ id: '/' });
   return <div className="graph-list-spacer" ref={setDroppableNodeRef} />;
-};
+});
+
+GraphListSpacer.displayName = 'GraphListSpacer';
 
 export const FolderItem: FC<{
   item: NodeGraphFolderItem;
@@ -510,10 +749,14 @@ export const FolderItem: FC<{
     depth,
     dragOverFolderName,
   }) => {
-    const [isExpanded, setExpanded] = useState(true);
+    const projectMetadata = useRecoilValue(projectMetadataState);
+    const [expandedFolders, setExpandedFolders] = useRecoilState(expandedFoldersState);
+
     const savedGraph = item.type === 'graph' ? item.graph : undefined;
     const graphIsRunning = savedGraph && runningGraphs.includes(savedGraph.metadata?.id ?? ('' as GraphId));
     const fullPath = item.type === 'folder' ? item.fullPath : item.graph.metadata?.name ?? 'Untitled Graph';
+    const isExpanded = expandedFolders[`${projectMetadata.id}/${fullPath}`] ?? true; // Default open
+
     const isRenaming = renamingItemFullPath === fullPath;
     const isSelected = graph.metadata?.id === savedGraph?.metadata?.id;
     const isDraggingOver =
@@ -542,6 +785,13 @@ export const FolderItem: FC<{
           : depth,
       [isDragging, dragOverFolderName, depth, item],
     );
+
+    const setExpanded = useStableCallback((expanded: boolean) => {
+      setExpandedFolders((prev) => ({
+        ...prev,
+        [`${projectMetadata.id}/${fullPath}`]: expanded,
+      }));
+    });
 
     return (
       <div ref={setDroppableNodeRef}>
@@ -612,6 +862,8 @@ export const FolderItem: FC<{
     );
   },
 );
+
+FolderItem.displayName = 'FolderItem';
 
 const FolderItemRename: FC<{
   value: string;

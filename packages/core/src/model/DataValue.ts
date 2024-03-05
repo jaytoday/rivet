@@ -1,4 +1,6 @@
+import type { GraphId } from '../index.js';
 import { exhaustiveTuple } from '../utils/genericUtilFunctions.js';
+import type { DataId } from './Project.js';
 
 export type DataValueDef<Type extends string, RuntimeType> = {
   type: Type;
@@ -9,12 +11,42 @@ export type StringDataValue = DataValueDef<'string', string>;
 export type NumberDataValue = DataValueDef<'number', number>;
 export type BoolDataValue = DataValueDef<'boolean', boolean>;
 
-export type ChatMessage = {
-  type: 'system' | 'user' | 'assistant' | 'function';
-  message: string;
-  name: string | undefined;
-  function_call: object | undefined;
+export type SystemChatMessage = {
+  type: 'system';
+  message: ChatMessageMessagePart | ChatMessageMessagePart[];
 };
+
+export type UserChatMessage = {
+  type: 'user';
+  message: ChatMessageMessagePart | ChatMessageMessagePart[];
+};
+
+export type AssistantChatMessage = {
+  type: 'assistant';
+  message: ChatMessageMessagePart | ChatMessageMessagePart[];
+  function_call:
+    | {
+        id: string | undefined;
+        name: string;
+        arguments: string; // JSON string
+      }
+    | undefined;
+};
+
+export type FunctionResponseChatMessage = {
+  type: 'function';
+  message: ChatMessageMessagePart | ChatMessageMessagePart[];
+  name: string;
+};
+
+export type ChatMessage = SystemChatMessage | UserChatMessage | AssistantChatMessage | FunctionResponseChatMessage;
+
+export type ChatMessageMessagePart =
+  | string
+  | { type: 'image'; mediaType: SupportedMediaTypes; data: Uint8Array }
+  | { type: 'url'; url: string };
+
+export type SupportedMediaTypes = 'image/jpeg' | 'image/png' | 'image/gif';
 
 export type ChatMessageDataValue = DataValueDef<'chat-message', ChatMessage>;
 
@@ -25,11 +57,9 @@ export type AnyDataValue = DataValueDef<'any', unknown>;
 export type ObjectDataValue = DataValueDef<'object', Record<string, unknown>>;
 export type VectorDataValue = DataValueDef<'vector', number[]>;
 export type BinaryDataValue = DataValueDef<'binary', Uint8Array>;
-export type ImageDataValue = DataValueDef<
-  'image',
-  { mediaType: 'image/jpeg' | 'image/png' | 'image/gif'; data: Uint8Array }
->;
+export type ImageDataValue = DataValueDef<'image', { mediaType: SupportedMediaTypes; data: Uint8Array }>;
 export type AudioDataValue = DataValueDef<'audio', { data: Uint8Array }>;
+export type GraphReferenceValue = DataValueDef<'graph-reference', { graphId: GraphId; graphName: string }>;
 
 /** GPT function definition */
 export type GptFunction = {
@@ -58,7 +88,8 @@ export type ScalarDataValue =
   | VectorDataValue
   | ImageDataValue
   | BinaryDataValue
-  | AudioDataValue;
+  | AudioDataValue
+  | GraphReferenceValue;
 
 export type ScalarType = ScalarDataValue['type'];
 
@@ -87,6 +118,11 @@ export type FunctionDataType = FunctionDataValues['type'];
 export type ScalarOrArrayDataType = ScalarOrArrayDataValue['type'];
 
 export type GetDataValue<Type extends DataType> = Extract<DataValue, { type: Type }>;
+
+/** A reference to large data stored outside the graphs themselves. */
+export type DataRef = {
+  refId: DataId;
+};
 
 export const dataTypes = exhaustiveTuple<DataType>()(
   'any',
@@ -149,6 +185,10 @@ export const dataTypes = exhaustiveTuple<DataType>()(
   'audio[]',
   'fn<audio>',
   'fn<audio[]>',
+  'graph-reference',
+  'graph-reference[]',
+  'fn<graph-reference>',
+  'fn<graph-reference[]>',
 );
 
 export const scalarTypes = exhaustiveTuple<ScalarType>()(
@@ -167,6 +207,7 @@ export const scalarTypes = exhaustiveTuple<ScalarType>()(
   'image',
   'binary',
   'audio',
+  'graph-reference',
 );
 
 export const dataTypeDisplayNames: Record<DataType, string> = {
@@ -230,6 +271,10 @@ export const dataTypeDisplayNames: Record<DataType, string> = {
   'audio[]': 'Audio Array',
   'fn<audio>': 'Function<Audio>',
   'fn<audio[]>': 'Function<Audio Array>',
+  'graph-reference': 'Graph Reference',
+  'graph-reference[]': 'Graph Reference Array',
+  'fn<graph-reference>': 'Function<Graph Reference>',
+  'fn<graph-reference[]>': 'Function<Graph Reference Array>',
 };
 
 export function isScalarDataValue(value: DataValue | undefined): value is ScalarDataValue {
@@ -333,8 +378,6 @@ export const scalarDefaults: { [P in ScalarDataType]: Extract<ScalarDataValue, {
   'chat-message': {
     type: 'user',
     message: '',
-    function_call: undefined,
-    name: undefined,
   },
   'control-flow-excluded': undefined,
   date: new Date().toISOString(),
@@ -354,6 +397,7 @@ export const scalarDefaults: { [P in ScalarDataType]: Extract<ScalarDataValue, {
   },
   binary: new Uint8Array(),
   audio: { data: new Uint8Array() },
+  'graph-reference': { graphId: '' as GraphId, graphName: '' },
 };
 
 export function getDefaultValue<T extends DataType>(type: T): (DataValue & { type: T })['value'] {

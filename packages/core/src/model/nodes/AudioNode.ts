@@ -1,13 +1,26 @@
-import { ChartNode, NodeId, PortId } from '../NodeBase.js';
-import { NodeInputDefinition, NodeOutputDefinition } from '../NodeBase.js';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { nanoid } from 'nanoid';
-import { EditorDefinition, Inputs, Outputs, base64ToUint8Array, expectType } from '../../index.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type PortId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nanoid } from 'nanoid/non-secure';
+import {
+  type DataRef,
+  type EditorDefinition,
+  type Inputs,
+  type InternalProcessContext,
+  type Outputs,
+} from '../../index.js';
+import { base64ToUint8Array, expectType } from '../../utils/index.js';
+import { nodeDefinition } from '../NodeDefinition.js';
 
 export type AudioNode = ChartNode<'audio', AudioNodeData>;
 
 type AudioNodeData = {
-  data: string;
+  data?: DataRef;
   useDataInput: boolean;
 };
 
@@ -19,7 +32,6 @@ export class AudioNodeImpl extends NodeImpl<AudioNode> {
       title: 'Audio',
       visualData: { x: 0, y: 0, width: 300 },
       data: {
-        data: '',
         useDataInput: false,
       },
     };
@@ -33,6 +45,7 @@ export class AudioNodeImpl extends NodeImpl<AudioNode> {
         id: 'data' as PortId,
         title: 'Data',
         dataType: 'string',
+        coerced: false,
       });
     }
 
@@ -70,13 +83,23 @@ export class AudioNodeImpl extends NodeImpl<AudioNode> {
     };
   }
 
-  async process(inputData: Inputs): Promise<Outputs> {
+  async process(inputData: Inputs, context: InternalProcessContext): Promise<Outputs> {
     let data: Uint8Array;
 
     if (this.chartNode.data.useDataInput) {
       data = expectType(inputData['data' as PortId], 'binary');
     } else {
-      const encodedData = this.data.data;
+      const dataRef = this.data.data?.refId;
+      if (!dataRef) {
+        throw new Error('No data ref');
+      }
+
+      const encodedData = context.project.data?.[dataRef] as string;
+
+      if (!encodedData) {
+        throw new Error(`No data at ref ${dataRef}`);
+      }
+
       data = base64ToUint8Array(encodedData);
     }
 

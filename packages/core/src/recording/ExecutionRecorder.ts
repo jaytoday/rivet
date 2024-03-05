@@ -1,12 +1,12 @@
-import { nanoid } from 'nanoid';
+import { nanoid } from 'nanoid/non-secure';
 import {
-  GraphProcessor,
-  ProcessEvents,
-  RecordedEvent,
-  RecordedEvents,
-  Recording,
-  RecordingId,
-  SerializedRecording,
+  type GraphProcessor,
+  type ProcessEvents,
+  type RecordedEvent,
+  type RecordedEvents,
+  type Recording,
+  type RecordingId,
+  type SerializedRecording,
 } from '../index.js';
 import Emittery from 'emittery';
 
@@ -54,9 +54,12 @@ const toRecordedEventMap: {
     error: typeof error === 'string' ? error : error?.stack,
     graphId: graph.metadata!.id!,
   }),
-  nodeExcluded: ({ node, processId }) => ({
+  nodeExcluded: ({ node, processId, inputs, outputs, reason }) => ({
     nodeId: node.id,
     processId,
+    inputs,
+    outputs,
+    reason,
   }),
   userInput: ({ node, inputs, callback, processId }) => ({
     nodeId: node.id,
@@ -81,12 +84,15 @@ const toRecordedEventMap: {
   globalSet: ({ id, processId, value }) => ({ id, processId, value }),
   pause: () => void 0,
   resume: () => void 0,
-  start: ({ contextValues, inputs, project }) => ({
+  start: ({ contextValues, inputs, project, startGraph }) => ({
     contextValues,
     inputs,
     projectId: project.metadata!.id!,
+    startGraph: startGraph.metadata!.id!,
   }),
   trace: (message) => message,
+  newAbortController: () => {},
+  finish: () => void 0,
 };
 
 const isPrefix = <const T extends string>(s: string, prefix: T): s is `${T}${string}` => s.startsWith(prefix);
@@ -123,27 +129,62 @@ export type ExecutionRecorderOptions = {
 export class ExecutionRecorder {
   #events: RecordedEvents[] = [];
   recordingId: RecordingId | undefined;
-  #emitter: Emittery<ExecutionRecorderEvents>;
-  #options: ExecutionRecorderOptions;
+  readonly #emitter: Emittery<ExecutionRecorderEvents>;
+
+  readonly #includePartialOutputs: boolean;
+  readonly #includeTrace: boolean;
 
   constructor(options: ExecutionRecorderOptions = {}) {
-    this.#options = options;
     this.#emitter = new Emittery();
     this.#emitter.bindMethods(this as any, ['on', 'off', 'once']);
+    this.#includePartialOutputs = options.includePartialOutputs ?? false;
+    this.#includeTrace = options.includeTrace ?? false;
   }
 
   on: Emittery<ExecutionRecorderEvents>['on'] = undefined!;
   off: Emittery<ExecutionRecorderEvents>['off'] = undefined!;
   once: Emittery<ExecutionRecorderEvents>['once'] = undefined!;
 
+  recordSocket(channel: WebSocket) {
+    return new Promise<void>((resolve, reject) => {
+      this.recordingId = nanoid() as RecordingId;
+
+      const listener = (event: MessageEvent) => {
+        const { message, data } = JSON.parse(event.data);
+
+        if (this.#includePartialOutputs === false && message === 'partialOutput') {
+          return;
+        }
+
+        if (this.#includeTrace === false && message === 'trace') {
+          return;
+        }
+
+        this.#events.push(toRecordedEvent(message, data) as RecordedEvents);
+
+        if (message === 'done' || message === 'abort' || message === 'error') {
+          this.#emitter.emit('finish', {
+            recording: this.getRecording(),
+          });
+
+          channel.removeEventListener('message', listener);
+
+          resolve();
+        }
+      };
+
+      channel.addEventListener('message', listener);
+    });
+  }
+
   record(processor: GraphProcessor) {
     this.recordingId = nanoid() as RecordingId;
     processor.onAny((event, data) => {
-      if (this.#options.includePartialOutputs === false && event === 'partialOutput') {
+      if (this.#includePartialOutputs === false && event === 'partialOutput') {
         return;
       }
 
-      if (this.#options.includeTrace === false && event === 'trace') {
+      if (this.#includeTrace === false && event === 'trace') {
         return;
       }
 

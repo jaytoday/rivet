@@ -1,21 +1,23 @@
 import Portal from '@atlaskit/portal';
 import Select from '@atlaskit/select';
 import { css } from '@emotion/react';
-import { FC, useRef } from 'react';
+import { type FC, useRef } from 'react';
 import { useSetRecoilState, useRecoilState } from 'recoil';
 import { useLoadRecording } from '../hooks/useLoadRecording';
 import { useRemoteDebugger } from '../hooks/useRemoteDebugger';
 import { selectedExecutorState } from '../state/execution';
-import { debuggerPanelOpenState } from '../state/ui';
+import { debuggerPanelOpenState, helpModalOpenState } from '../state/ui';
 import { isInTauri } from '../utils/tauri';
 import { settingsModalOpenState } from './SettingsModal';
-import { ReactComponent as LinkIcon } from 'majesticons/line/link-circle-line.svg';
-import { ReactComponent as GearIcon } from 'majesticons/line/settings-cog-line.svg';
-import { ReactComponent as CpuIcon } from 'majesticons/line/cpu-line.svg';
-import { ReactComponent as ForwardCircleIcon } from 'majesticons/line/forward-circle-line.svg';
-import { ReactComponent as CopyIcon } from 'majesticons/line/clipboard-plus-line.svg';
+import LinkIcon from 'majesticons/line/link-circle-line.svg?react';
+import GearIcon from 'majesticons/line/settings-cog-line.svg?react';
+import CpuIcon from 'majesticons/line/cpu-line.svg?react';
+import ForwardCircleIcon from 'majesticons/line/forward-circle-line.svg?react';
+import CopyIcon from 'majesticons/line/clipboard-plus-line.svg?react';
 import { CopyAsTestCaseModal } from './CopyAsTestCaseModal';
 import { useToggle } from 'ahooks';
+import { executorOptions } from '../state/settings';
+import QuestionIcon from 'majesticons/line/question-circle-line.svg?react';
 
 const moreMenuStyles = css`
   background-color: var(--grey-darkish);
@@ -70,13 +72,6 @@ const moreMenuStyles = css`
   }
 `;
 
-const executorOptions = isInTauri()
-  ? ([
-      { label: 'Browser', value: 'browser' },
-      { label: 'Node', value: 'node' },
-    ] as const)
-  : ([{ label: 'Browser', value: 'browser' }] as const);
-
 export const ActionBarMoreMenu: FC<{
   onClose: () => void;
   onCopyAsTestCase: () => void;
@@ -87,6 +82,7 @@ export const ActionBarMoreMenu: FC<{
   const [selectedExecutor, setSelectedExecutor] = useRecoilState(selectedExecutorState);
   const selectedExecutorOption = executorOptions.find((option) => option.value === selectedExecutor);
   const { loadRecording } = useLoadRecording();
+  const setHelpModalOpen = useSetRecoilState(helpModalOpenState);
 
   const openDebuggerPanel = () => {
     setDebuggerPanelOpen(true);
@@ -100,6 +96,11 @@ export const ActionBarMoreMenu: FC<{
 
   const openSettings = () => {
     setSettingsOpen(true);
+    onClose();
+  };
+
+  const openHelp = () => {
+    setHelpModalOpen(true);
     onClose();
   };
 
@@ -142,6 +143,9 @@ export const ActionBarMoreMenu: FC<{
       </div>
       <div className="menu-item menu-item-button settings" onClick={openSettings}>
         <GearIcon /> Settings
+      </div>
+      <div className="menu-item menu-item-button help" onClick={openHelp}>
+        <QuestionIcon /> Help
       </div>
     </div>
   );

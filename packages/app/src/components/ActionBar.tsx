@@ -1,31 +1,30 @@
 import { css } from '@emotion/react';
 import clsx from 'clsx';
-import { FC, useRef, useState } from 'react';
-import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
+import { type FC } from 'react';
+import { useRecoilValue } from 'recoil';
 import { useLoadRecording } from '../hooks/useLoadRecording';
 import { useSaveRecording } from '../hooks/useSaveRecording';
 import { graphRunningState, graphPausedState } from '../state/dataFlow';
 import { lastRecordingState, loadedRecordingState, selectedExecutorState } from '../state/execution';
-import { ReactComponent as ChevronRightIcon } from 'majesticons/line/chevron-right-line.svg';
-import { ReactComponent as MultiplyIcon } from 'majesticons/line/multiply-line.svg';
-import { ReactComponent as PauseIcon } from 'majesticons/line/pause-circle-line.svg';
-import { ReactComponent as PlayIcon } from 'majesticons/line/play-circle-line.svg';
-import { ReactComponent as MoreMenuVerticalIcon } from 'majesticons/line/more-menu-vertical-line.svg';
+import ChevronRightIcon from 'majesticons/line/chevron-right-line.svg?react';
+import MultiplyIcon from 'majesticons/line/multiply-line.svg?react';
+import PauseIcon from 'majesticons/line/pause-circle-line.svg?react';
+import PlayIcon from 'majesticons/line/play-circle-line.svg?react';
+import MoreMenuVerticalIcon from 'majesticons/line/more-menu-vertical-line.svg?react';
 import Popup from '@atlaskit/popup';
-import { settingsModalOpenState } from './SettingsModal';
 import { useRemoteDebugger } from '../hooks/useRemoteDebugger';
-import { isInTauri } from '../utils/tauri';
-import Select from '@atlaskit/select';
-import Portal from '@atlaskit/portal';
-import { debuggerPanelOpenState } from '../state/ui';
 import { ActionBarMoreMenu } from './ActionBarMoreMenu';
-import { useCurrentExecution } from '../hooks/useCurrentExecution';
 import { CopyAsTestCaseModal } from './CopyAsTestCaseModal';
 import { useToggle } from 'ahooks';
+import { useDependsOnPlugins } from '../hooks/useDependsOnPlugins';
+import { GentraceInteractors } from './gentrace/GentraceInteractors';
+import { projectMetadataState } from '../state/savedGraphs';
+import { graphMetadataState } from '../state/graph';
+import { type GraphId } from '@ironclad/rivet-core';
 
 const styles = css`
   position: fixed;
-  top: 20px;
+  top: calc(20px + var(--project-selector-height));
   right: 20px;
   background: var(--grey-darker);
   border-radius: 4px;
@@ -42,6 +41,7 @@ const styles = css`
   .unload-recording-button button,
   .run-test-button button,
   .save-recording-button button,
+  .run-gentrace-button button,
   .more-menu,
   .remote-debugger-button button {
     border: none;
@@ -64,6 +64,7 @@ const styles = css`
     }
   }
 
+  .run-gentrace-button button,
   .pause-button button,
   .save-recording-button button {
     background-color: rgba(255, 255, 255, 0.1);
@@ -125,20 +126,16 @@ const styles = css`
 `;
 
 export type ActionBarProps = {
-  onRunGraph?: () => void;
+  onRunGraph?: (options: { graphId?: GraphId }) => void;
   onRunTests?: () => void;
   onAbortGraph?: () => void;
   onPauseGraph?: () => void;
   onResumeGraph?: () => void;
 };
 
-export const ActionBar: FC<ActionBarProps> = ({
-  onRunGraph,
-  onRunTests,
-  onAbortGraph,
-  onPauseGraph,
-  onResumeGraph,
-}) => {
+export const ActionBar: FC<ActionBarProps> = ({ onRunGraph, onAbortGraph, onPauseGraph, onResumeGraph }) => {
+  const graphMetadata = useRecoilValue(graphMetadataState);
+  const projectMetadata = useRecoilValue(projectMetadataState);
   const lastRecording = useRecoilValue(lastRecordingState);
   const saveRecording = useSaveRecording();
 
@@ -148,14 +145,24 @@ export const ActionBar: FC<ActionBarProps> = ({
   const loadedRecording = useRecoilValue(loadedRecordingState);
   const { unloadRecording } = useLoadRecording();
   const [menuIsOpen, toggleMenuIsOpen] = useToggle();
+  const selectedExecutor = useRecoilValue(selectedExecutorState);
 
   const { remoteDebuggerState: remoteDebugger, disconnect } = useRemoteDebugger();
   const isActuallyRemoteDebugging = remoteDebugger.started && !remoteDebugger.isInternalExecutor;
   const [copyAsTestCaseModalOpen, toggleCopyAsTestCaseModalOpen] = useToggle();
 
+  const plugins = useDependsOnPlugins();
+
+  const gentracePlugin = plugins.find((plugin) => plugin.id === 'gentrace');
+  const isGentracePluginEnabled = !!gentracePlugin;
+
+  const canRun = (remoteDebugger.started && !remoteDebugger.reconnecting) || selectedExecutor === 'browser';
+  const hasMainGraph = projectMetadata.mainGraphId != null;
+  const isMainGraph = hasMainGraph && graphMetadata?.id === projectMetadata.mainGraphId;
+
   return (
     <div css={styles}>
-      {(isActuallyRemoteDebugging || remoteDebugger.reconnecting) && (
+      {(isActuallyRemoteDebugging || (!remoteDebugger.isInternalExecutor && remoteDebugger.reconnecting)) && (
         <div
           className={clsx('remote-debugger-button active', {
             reconnecting: remoteDebugger.reconnecting,
@@ -187,33 +194,52 @@ export const ActionBar: FC<ActionBarProps> = ({
           </button>
         </div>
       )}
-      <div className={clsx('run-test-button', { running: graphRunning })}>
-        <button onClick={graphRunning ? onAbortGraph : onRunTests}>
-          Run Test <ChevronRightIcon />
-        </button>
-      </div>
+
+      {isGentracePluginEnabled && <GentraceInteractors />}
+
       {lastRecording && (
         <div className={clsx('save-recording-button')}>
           <button onClick={saveRecording}>Save Recording</button>
         </div>
       )}
       <div className={clsx('run-button', { running: graphRunning, recording: !!loadedRecording })}>
-        <button onClick={graphRunning ? onAbortGraph : onRunGraph}>
-          {graphRunning ? (
-            <>
-              Abort <MultiplyIcon />
-            </>
-          ) : loadedRecording ? (
-            <>
-              Play Recording <ChevronRightIcon />
-            </>
-          ) : (
-            <>
-              Run <ChevronRightIcon />
-            </>
-          )}
-        </button>
+        {canRun && (
+          <button onClick={() => (graphRunning ? onAbortGraph?.() : onRunGraph?.({ graphId: graphMetadata?.id }))}>
+            {graphRunning ? (
+              <>
+                Abort <MultiplyIcon />
+              </>
+            ) : loadedRecording ? (
+              <>
+                Play Recording <ChevronRightIcon />
+              </>
+            ) : (
+              <>
+                {hasMainGraph && !isMainGraph ? `Run ${graphMetadata?.name}` : 'Run'} <ChevronRightIcon />
+              </>
+            )}
+          </button>
+        )}
       </div>
+      {hasMainGraph && !isMainGraph && !graphRunning && (
+        <div className={clsx('run-button', { running: graphRunning })}>
+          {canRun && (
+            <button
+              onClick={() => (graphRunning ? onAbortGraph?.() : onRunGraph?.({ graphId: projectMetadata.mainGraphId }))}
+            >
+              {graphRunning ? (
+                <>
+                  Abort <MultiplyIcon />
+                </>
+              ) : (
+                <>
+                  Run Main <ChevronRightIcon />
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      )}
       <Popup
         isOpen={menuIsOpen}
         onClose={toggleMenuIsOpen.setLeft}

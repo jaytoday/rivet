@@ -1,20 +1,24 @@
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { ChartNode, NodeId, NodeInputDefinition, NodeOutputDefinition, PortId } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { DataValue, ArrayDataValue, StringDataValue } from '../DataValue.js';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import type { ChartNode, NodeId, NodeInputDefinition, NodeOutputDefinition, PortId } from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import type { ArrayDataValue, StringDataValue } from '../DataValue.js';
 import { zip } from 'lodash-es';
-import { Outputs, Inputs, expectType, EditorDefinition, NodeBodySpec, coerceType } from '../../index.js';
+import { type Outputs, type Inputs, type EditorDefinition, type NodeBodySpec } from '../../index.js';
 import { dedent } from 'ts-dedent';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { coerceType } from '../../utils/coerceType.js';
 
 export type UserInputNode = ChartNode<'userInput', UserInputNodeData>;
 
 export type UserInputNodeData = {
   prompt: string;
   useInput: boolean;
+
+  renderingFormat?: 'preformatted' | 'markdown';
 };
 
 export class UserInputNodeImpl extends NodeImpl<UserInputNode> {
-  static create(prompt = 'This is an example question?'): UserInputNode {
+  static create(): UserInputNode {
     const chartNode: UserInputNode = {
       type: 'userInput',
       title: 'User Input',
@@ -25,7 +29,7 @@ export class UserInputNodeImpl extends NodeImpl<UserInputNode> {
         width: 250,
       },
       data: {
-        prompt,
+        prompt: 'This is an example question?',
         useInput: false,
       },
     };
@@ -69,6 +73,22 @@ export class UserInputNodeImpl extends NodeImpl<UserInputNode> {
         dataKey: 'prompt',
         useInputToggleDataKey: 'useInput',
         language: 'plain-text',
+      },
+      {
+        type: 'group',
+        label: 'Rendering',
+        editors: [
+          {
+            type: 'dropdown',
+            dataKey: 'renderingFormat',
+            label: 'Format',
+            options: [
+              { label: 'Preformatted', value: 'preformatted' },
+              { label: 'Markdown', value: 'markdown' },
+            ],
+            defaultValue: 'markdown',
+          },
+        ],
       },
     ];
   }

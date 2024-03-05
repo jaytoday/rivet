@@ -1,11 +1,18 @@
-import { ChartNode, NodeId, PortId } from '../NodeBase.js';
-import { NodeInputDefinition, NodeOutputDefinition } from '../NodeBase.js';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { nanoid } from 'nanoid';
-import { Inputs, Outputs } from '../GraphProcessor.js';
-import { NodeBodySpec, expectType } from '../../index.js';
-import { InternalProcessContext } from '../ProcessContext.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type PortId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { nanoid } from 'nanoid/non-secure';
+import { type Inputs, type Outputs } from '../GraphProcessor.js';
+import { type NodeBodySpec } from '../../index.js';
+import { type InternalProcessContext } from '../ProcessContext.js';
 import { dedent } from 'ts-dedent';
+import { expectType } from '../../utils/expectType.js';
 
 export type ReadDirectoryNode = ChartNode<'readDirectory', ReadDirectoryNodeData>;
 
@@ -62,6 +69,7 @@ export class ReadDirectoryNodeImpl extends NodeImpl<ReadDirectoryNode> {
         title: 'Path',
         dataType: 'string',
         required: true,
+        coerced: false,
       });
     }
 
@@ -71,6 +79,7 @@ export class ReadDirectoryNodeImpl extends NodeImpl<ReadDirectoryNode> {
         title: 'Recursive',
         dataType: 'boolean',
         required: true,
+        coerced: false,
       });
     }
 
@@ -80,6 +89,7 @@ export class ReadDirectoryNodeImpl extends NodeImpl<ReadDirectoryNode> {
         title: 'Include Directories',
         dataType: 'boolean',
         required: true,
+        coerced: false,
       });
     }
 
@@ -89,6 +99,7 @@ export class ReadDirectoryNodeImpl extends NodeImpl<ReadDirectoryNode> {
         title: 'Filter Globs',
         dataType: 'string[]',
         required: true,
+        coerced: false,
       });
     }
 
@@ -98,6 +109,7 @@ export class ReadDirectoryNodeImpl extends NodeImpl<ReadDirectoryNode> {
         title: 'Relative',
         dataType: 'boolean',
         required: true,
+        coerced: false,
       });
     }
 
@@ -129,8 +141,8 @@ export class ReadDirectoryNodeImpl extends NodeImpl<ReadDirectoryNode> {
         this.data.useFilterGlobsInput
           ? '(Input)'
           : this.data.filterGlobs.length > 0
-          ? this.data.filterGlobs.join(', ')
-          : 'None'
+            ? this.data.filterGlobs.join(', ')
+            : 'None'
       }
     `;
   }
@@ -147,6 +159,12 @@ export class ReadDirectoryNodeImpl extends NodeImpl<ReadDirectoryNode> {
   }
 
   async process(inputData: Inputs, context: InternalProcessContext): Promise<Outputs> {
+    const { nativeApi } = context;
+
+    if (nativeApi == null) {
+      throw new Error('This node requires a native API to run.');
+    }
+
     const path = this.chartNode.data.usePathInput
       ? expectType(inputData['path' as PortId], 'string')
       : this.chartNode.data.path;
@@ -171,17 +189,8 @@ export class ReadDirectoryNodeImpl extends NodeImpl<ReadDirectoryNode> {
       ? expectType(inputData['ignores' as PortId], 'string[]')
       : this.chartNode.data.ignores;
 
-    // Can be slow, assume a directory doesn't change during execution
-    // TODO once this is at auto-gpt level changing files, will need to rethink, but good enough
-    // for now
-    const cacheKey = `ReadDirectoryNode-${path}-${recursive}-${includeDirectories}-${filterGlobs.join()}-${relative}-${ignores?.join()}`;
-    const cached = context.executionCache.get(cacheKey);
-    if (cached) {
-      return cached as Outputs;
-    }
-
     try {
-      const files = await context.nativeApi.readdir(path, undefined, {
+      const files = await nativeApi.readdir(path, undefined, {
         recursive,
         includeDirectories,
         filterGlobs,
@@ -193,8 +202,6 @@ export class ReadDirectoryNodeImpl extends NodeImpl<ReadDirectoryNode> {
         ['paths' as PortId]: { type: 'string[]', value: files },
         ['rootPath' as PortId]: { type: 'string', value: path },
       };
-
-      context.executionCache.set(cacheKey, outputs);
 
       return outputs;
     } catch (err) {

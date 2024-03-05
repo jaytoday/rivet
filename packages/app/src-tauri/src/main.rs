@@ -3,13 +3,25 @@
     windows_subsystem = "windows"
 )]
 
-use tauri::{CustomMenuItem, Menu, MenuItem, Submenu};
+use std::path::Path;
+
+use tauri::{AppHandle, CustomMenuItem, InvokeError, Manager, Menu, MenuItem, Submenu};
+mod plugins;
 
 fn main() {
+    // Fix $PATH on MacOS and Linux to include the bashrc/zshrc
+    if let Err(err) = fix_path_env::fix() {
+        eprintln!("Error fixing $PATH: {}", err);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_persisted_scope::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![get_environment_variable])
+        .invoke_handler(tauri::generate_handler![
+            get_environment_variable,
+            plugins::extract_package_plugin_tarball,
+            allow_data_file_scope
+        ])
         .menu(create_menu())
         .on_menu_event(|event| match event.menu_item_id() {
             "toggle_devtools" => {
@@ -21,6 +33,12 @@ fn main() {
             }
             _ => {}
         })
+        .setup(|app| {
+            if let Some(path) = app.path_resolver().app_local_data_dir() {
+                app.fs_scope().allow_directory(path, true)?;
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -28,6 +46,26 @@ fn main() {
 #[tauri::command]
 fn get_environment_variable(name: &str) -> String {
     std::env::var(name).unwrap_or_default()
+}
+
+#[tauri::command]
+fn allow_data_file_scope(
+    app_handle: AppHandle,
+    project_file_path: &str,
+) -> Result<(), InvokeError> {
+    let scope = app_handle.fs_scope();
+
+    let folder_path = Path::new(project_file_path).parent().unwrap();
+    let file_name_no_extension = Path::new(project_file_path)
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let data_file_path = folder_path.join(format!("{}.rivet-data", file_name_no_extension));
+
+    scope.allow_file(&data_file_path)?;
+
+    Ok(())
 }
 
 fn create_menu() -> Menu {
@@ -82,12 +120,10 @@ fn create_menu() -> Menu {
     let help_menu = Submenu::new(
         "Help",
         Menu::new()
-            .add_item(CustomMenuItem::new("Learn More", "Learn More"))
-            .add_native_item(MenuItem::Separator)
-            .add_item(CustomMenuItem::new(
-                "toggle_devtools",
-                "Toggle Developer Tools",
-            )),
+            .add_item(CustomMenuItem::new("get_help", "Get Help"))
+            .add_item(
+                CustomMenuItem::new("toggle_devtools", "Toggle Developer Tools").accelerator("F12"),
+            ),
     );
 
     Menu::new()
@@ -125,7 +161,8 @@ fn create_menu() -> Menu {
         .add_submenu(Submenu::new(
             "Run",
             Menu::new()
-                .add_item(CustomMenuItem::new("run", "Run Graph").accelerator("CmdOrCtrl+Enter")),
+                .add_item(CustomMenuItem::new("run", "Run Graph").accelerator("CmdOrCtrl+Enter"))
+                .add_item(CustomMenuItem::new("clear_outputs", "Clear Outputs")),
         ))
         .add_submenu(view_menu)
         .add_submenu(debug_menu)

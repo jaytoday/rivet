@@ -1,18 +1,21 @@
 import { getError } from './errors.js';
+import { DEFAULT_CHAT_NODE_TIMEOUT } from './defaults.js';
 
 // https://github.com/openai/openai-node/issues/18#issuecomment-1518715285
 export class EventSourceResponse extends Response {
   name: string;
+  timeout?: number;
   readonly streams: {
     eventStream: ReadableStream<string>;
     textStream: ReadableStream<string>;
   } | null;
 
-  constructor(body: ReadableStream<Uint8Array> | null, init?: ResponseInit) {
+  constructor(body: ReadableStream<Uint8Array> | null, init?: ResponseInit, timeout?: number) {
     if (body == null) {
       super(null, init);
       this.name = 'EventSourceResponse';
       this.streams = null;
+      this.timeout = timeout;
       return;
     }
 
@@ -23,6 +26,7 @@ export class EventSourceResponse extends Response {
     super(bodyForString, init);
     this.name = 'EventSourceResponse';
     this.streams = streams;
+    this.timeout = timeout;
   }
 
   async *events(): AsyncGenerator<string> {
@@ -33,7 +37,7 @@ export class EventSourceResponse extends Response {
 
     try {
       while (true) {
-        const { done, value } = await this.raceWithTimeout(reader.read());
+        const { done, value } = await this.raceWithTimeout(reader.read(), this.timeout);
         if (done) {
           break;
         }
@@ -48,12 +52,14 @@ export class EventSourceResponse extends Response {
     }
   }
 
-  private async raceWithTimeout<T>(promise: Promise<T>, timeout = 5000): Promise<T> {
+  private async raceWithTimeout<T>(promise: Promise<T>, timeout?: number): Promise<T> {
+    const raceTimeout = timeout ?? DEFAULT_CHAT_NODE_TIMEOUT;
+
     // eslint-disable-next-line no-async-promise-executor -- Error handled correctly
     return new Promise(async (resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error('Timeout: API response took too long.'));
-      }, timeout);
+      }, raceTimeout);
 
       try {
         const result = await promise;
@@ -67,7 +73,11 @@ export class EventSourceResponse extends Response {
   }
 }
 
-export default async function fetchEventSource(url: string, init?: RequestInit): Promise<EventSourceResponse> {
+export default async function fetchEventSource(
+  url: string,
+  init?: RequestInit,
+  timeout?: number,
+): Promise<EventSourceResponse> {
   const headers = {
     ...init?.headers,
     accept: 'text/event-stream',
@@ -78,10 +88,10 @@ export default async function fetchEventSource(url: string, init?: RequestInit):
     headers,
   });
 
-  return new EventSourceResponse(response.body, response);
+  return new EventSourceResponse(response.body, response, timeout);
 }
 
-const lineSplitter = new (class implements Transformer<string, string> {
+class LineSplitter implements Transformer<string, string> {
   private buffer = '';
   constructor(readonly separator = /\n+/) {}
 
@@ -101,7 +111,7 @@ const lineSplitter = new (class implements Transformer<string, string> {
       this.buffer = '';
     }
   }
-})();
+}
 
 function createEventStream(body: ReadableStream<Uint8Array> | null) {
   if (body == null) {
@@ -110,9 +120,13 @@ function createEventStream(body: ReadableStream<Uint8Array> | null) {
 
   const textStream = body.pipeThrough(new TextDecoderStream());
 
-  const eventStream = textStream.pipeThrough(new TransformStream(lineSplitter)).pipeThrough(
+  const eventStream = textStream.pipeThrough(new TransformStream(new LineSplitter())).pipeThrough(
     new TransformStream<string, string>({
       transform(line, controller) {
+        if (line.trim().length === 0) {
+          return;
+        }
+
         if (line.startsWith('data: ')) {
           const data = line.slice(6).trim();
           controller.enqueue(data);

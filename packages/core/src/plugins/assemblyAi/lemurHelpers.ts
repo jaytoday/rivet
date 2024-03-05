@@ -1,21 +1,33 @@
-import { AnyDataValue, ArrayDataValue, Inputs, InternalProcessContext, PortId, StringArrayDataValue, StringDataValue, coerceType, coerceTypeOptional } from "../../index.js";
+import type { LemurBaseParams } from 'assemblyai';
+import {
+  type AnyDataValue,
+  type ArrayDataValue,
+  type Inputs,
+  type InternalProcessContext,
+  type PortId,
+  type StringArrayDataValue,
+  type StringDataValue,
+} from '../../index.js';
+import { coerceType, coerceTypeOptional } from '../../utils/coerceType.js';
 
 function getTranscriptIds(inputs: Inputs): string[] {
-  const input = inputs['transcript_ids' as PortId] as StringDataValue | StringArrayDataValue | AnyDataValue | ArrayDataValue<AnyDataValue>;
+  const input = inputs['transcript_ids' as PortId] as
+    | StringDataValue
+    | StringArrayDataValue
+    | AnyDataValue
+    | ArrayDataValue<AnyDataValue>;
   if (!input) throw new Error('Transcript IDs are required.');
 
-  if (
-    input.type === 'string' ||
-    (input.type === 'any' && typeof input.value === 'string')
-  ) {
+  if (input.type === 'string' || (input.type === 'any' && typeof input.value === 'string')) {
     return [coerceType(input, 'string')];
   } else if (
     input.type === 'string[]' ||
+    input.type === 'any[]' ||
     (input.type === 'any' && Array.isArray(input.value))
   ) {
     return coerceType(input, 'string[]');
   }
-  throw new Error('Audio input must be a string or string[] of transcript IDs.');
+  throw new Error('Transcript IDs must be a string or string[] of transcript IDs.');
 }
 
 export function getApiKey(context: InternalProcessContext) {
@@ -26,8 +38,8 @@ export function getApiKey(context: InternalProcessContext) {
   return apiKey;
 }
 
-export function getLemurParams(inputs: Inputs, editorData: LemurNodeData): LemurParams {
-  const params: LemurParams = {
+export function getLemurParams(inputs: Inputs, editorData: LemurNodeData): LemurBaseParams {
+  const params: LemurBaseParams = {
     transcript_ids: getTranscriptIds(inputs),
     context: coerceTypeOptional(inputs['context' as PortId], 'string') || editorData.context || undefined,
     final_model: editorData.final_model && editorData.final_model !== 'default' ? editorData.final_model : undefined,
@@ -36,6 +48,12 @@ export function getLemurParams(inputs: Inputs, editorData: LemurNodeData): Lemur
 
   return params;
 }
+
+export const lemurTranscriptIdsInputDefinition = {
+  id: 'transcript_ids' as PortId,
+  dataType: ['string', 'string[]', 'any', 'any[]'],
+  title: 'Transcript IDs',
+} as const;
 
 export const lemurEditorDefinitions = [
   {
@@ -51,26 +69,19 @@ export const lemurEditorDefinitions = [
         value: 'basic',
         label: 'Basic',
       },
-    ]
+    ],
   },
   {
     type: 'number',
     label: 'Maximum Output Size',
-    dataKey: 'max_output_size'
+    dataKey: 'max_output_size',
   },
 ] as const;
 
 export type FinalModel = 'default' | 'basic';
 
-export type LemurParams = {
-  transcript_ids: string[];
-  context?: string;
-  final_model?: FinalModel;
-  max_output_size?: number;
-}
-
 export type LemurNodeData = {
   context?: string;
   final_model?: FinalModel;
   max_output_size?: number;
-}
+};

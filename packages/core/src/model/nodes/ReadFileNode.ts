@@ -1,17 +1,27 @@
-import { ChartNode, NodeId, PortId } from '../NodeBase.js';
-import { NodeInputDefinition, NodeOutputDefinition } from '../NodeBase.js';
-import { DataValue } from '../DataValue.js';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { nanoid } from 'nanoid';
-import { expectType } from '../../index.js';
-import { InternalProcessContext } from '../ProcessContext.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type PortId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { type DataValue } from '../DataValue.js';
+import { NodeImpl, type NodeBody, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { nanoid } from 'nanoid/non-secure';
+import { getInputOrData } from '../../utils/index.js';
+import { type InternalProcessContext } from '../ProcessContext.js';
 import { dedent } from 'ts-dedent';
+import type { EditorDefinition } from '../EditorDefinition.js';
+import type { RivetUIContext } from '../RivetUIContext.js';
 
 export type ReadFileNode = ChartNode<'readFile', ReadFileNodeData>;
 
 type ReadFileNodeData = {
   path: string;
   usePathInput: boolean;
+
+  asBinary?: boolean;
 
   errorOnMissingFile?: boolean;
 };
@@ -25,6 +35,7 @@ export class ReadFileNodeImpl extends NodeImpl<ReadFileNode> {
       visualData: { x: 0, y: 0, width: 250 },
       data: {
         path: '',
+        asBinary: false,
         usePathInput: true,
         errorOnMissingFile: false,
       },
@@ -39,6 +50,7 @@ export class ReadFileNodeImpl extends NodeImpl<ReadFileNode> {
         id: 'path' as PortId,
         title: 'Path',
         dataType: 'string',
+        coerced: false,
       });
     }
 
@@ -50,7 +62,7 @@ export class ReadFileNodeImpl extends NodeImpl<ReadFileNode> {
       {
         id: 'content' as PortId,
         title: 'Content',
-        dataType: 'string',
+        dataType: this.data.asBinary ? 'binary' : 'string',
       },
     ];
   }
@@ -66,25 +78,65 @@ export class ReadFileNodeImpl extends NodeImpl<ReadFileNode> {
     };
   }
 
+  getEditors(): EditorDefinition<ReadFileNode>[] {
+    return [
+      {
+        type: 'filePathBrowser',
+        label: 'Path',
+        dataKey: 'path',
+        useInputToggleDataKey: 'usePathInput',
+      },
+      {
+        type: 'toggle',
+        label: 'Error on Missing File',
+        dataKey: 'errorOnMissingFile',
+      },
+      {
+        type: 'toggle',
+        label: 'Read as Binary',
+        dataKey: 'asBinary',
+      },
+    ];
+  }
+
+  getBody(): NodeBody {
+    return dedent`
+      ${this.data.asBinary ? 'Read as Binary' : 'Read as Text'}
+      ${this.data.usePathInput ? '' : `Path: ${this.data.path}`}
+    `;
+  }
+
   async process(
     inputData: Record<PortId, DataValue>,
     context: InternalProcessContext,
   ): Promise<Record<PortId, DataValue>> {
-    const path = this.chartNode.data.usePathInput
-      ? expectType(inputData['path' as PortId], 'string')
-      : this.chartNode.data.path;
+    const { nativeApi } = context;
+
+    if (nativeApi == null) {
+      throw new Error('This node requires a native API to run.');
+    }
+
+    const path = getInputOrData(this.chartNode.data, inputData, 'path');
 
     try {
-      const content = await context.nativeApi.readTextFile(path, undefined);
-      return {
-        ['content' as PortId]: { type: 'string', value: content },
-      };
+      if (this.data.asBinary) {
+        const content = await nativeApi.readBinaryFile(path);
+        const buffer = await content.arrayBuffer();
+        return {
+          ['content' as PortId]: { type: 'binary', value: new Uint8Array(buffer) },
+        };
+      } else {
+        const content = await nativeApi.readTextFile(path, undefined);
+        return {
+          ['content' as PortId]: { type: 'string', value: content },
+        };
+      }
     } catch (err) {
       if (this.chartNode.data.errorOnMissingFile) {
         throw err;
       } else {
         return {
-          ['content' as PortId]: { type: 'string', value: '(file does not exist)' },
+          ['content' as PortId]: { type: 'control-flow-excluded', value: undefined },
         };
       }
     }

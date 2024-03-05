@@ -1,12 +1,13 @@
 import {
   GraphProcessor,
-  NodeId,
-  StringArrayDataValue,
-  DataValue,
+  type NodeId,
+  type StringArrayDataValue,
+  type DataValue,
   coerceTypeOptional,
   ExecutionRecorder,
-  GraphOutputs,
+  type GraphOutputs,
   globalRivetNodeRegistry,
+  type GraphId,
 } from '@ironclad/rivet-core';
 import { produce } from 'immer';
 import { useRef } from 'react';
@@ -17,13 +18,15 @@ import { useSaveCurrentGraph } from './useSaveCurrentGraph';
 import { useCurrentExecution } from './useCurrentExecution';
 import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
 import { userInputModalQuestionsState, userInputModalSubmitState } from '../state/userInput';
-import { projectState } from '../state/savedGraphs';
-import { settingsState } from '../state/settings';
+import { projectContextState, projectDataState, projectState } from '../state/savedGraphs';
+import { recordExecutionsState, settingsState } from '../state/settings';
 import { graphState } from '../state/graph';
 import { lastRecordingState, loadedRecordingState } from '../state/execution';
 import { fillMissingSettingsFromEnvironmentVariables } from '../utils/tauri';
 import { trivetState } from '../state/trivet';
 import { runTrivet } from '@ironclad/trivet';
+import { datasetProvider } from '../utils/globals';
+import { entries } from '../../../core/src/utils/typeSafety';
 
 export function useLocalExecutor() {
   const project = useRecoilValue(projectState);
@@ -37,6 +40,9 @@ export function useLocalExecutor() {
   const loadedRecording = useRecoilValue(loadedRecordingState);
   const setLastRecordingState = useSetRecoilState(lastRecordingState);
   const [{ testSuites }, setTrivetState] = useRecoilState(trivetState);
+  const recordExecutions = useRecoilValue(recordExecutionsState);
+  const projectData = useRecoilValue(projectDataState);
+  const projectContext = useRecoilValue(projectContextState(project.metadata.id));
 
   function attachGraphEvents(processor: GraphProcessor) {
     processor.on('nodeStart', currentExecution.onNodeStart);
@@ -69,6 +75,7 @@ export function useLocalExecutor() {
     processor.on('pause', currentExecution.onPause);
     processor.on('resume', currentExecution.onResume);
     processor.on('error', currentExecution.onError);
+    processor.on('nodeExcluded', currentExecution.onNodeExcluded);
 
     processor.onUserEvent('toast', (data: DataValue | undefined) => {
       const stringData = coerceTypeOptional(data, 'string');
@@ -81,11 +88,14 @@ export function useLocalExecutor() {
   const tryRunGraph = useStableCallback(
     async (
       options: {
+        graphId?: GraphId;
         to?: NodeId[];
       } = {},
     ) => {
       try {
         saveGraph();
+
+        const graphToRun = options.graphId ?? graph.metadata!.id!;
 
         if (currentProcessor.current?.isRunning) {
           return;
@@ -93,21 +103,26 @@ export function useLocalExecutor() {
 
         const tempProject = {
           ...project,
+          // Include the just-saved version of the currently selected graph, because saveGraph won't update the `project` until next render
           graphs: {
             ...project.graphs,
             [graph.metadata!.id!]: graph,
           },
+          data: projectData,
         };
 
         const recorder = new ExecutionRecorder();
-        const processor = new GraphProcessor(tempProject, graph.metadata!.id!);
+        const processor = new GraphProcessor(tempProject, graphToRun);
+        processor.executor = 'browser';
         processor.recordingPlaybackChatLatency = savedSettings.recordingPlaybackLatency ?? 1000;
 
         if (options.to) {
           processor.runToNodeIds = options.to;
         }
 
-        recorder.record(processor);
+        if (recordExecutions) {
+          recorder.record(processor);
+        }
 
         attachGraphEvents(processor);
 
@@ -116,18 +131,31 @@ export function useLocalExecutor() {
         if (loadedRecording) {
           results = await processor.replayRecording(loadedRecording.recorder);
         } else {
-          results = await processor.processGraph({
-            settings: await fillMissingSettingsFromEnvironmentVariables(
-              savedSettings,
-              globalRivetNodeRegistry.getPlugins(),
-            ),
-            nativeApi: new TauriNativeApi(),
-          });
+          const contextValues = entries(projectContext).reduce(
+            (acc, [key, value]) => ({
+              ...acc,
+              [key]: value.value,
+            }),
+            {} as Record<string, DataValue>,
+          );
+
+          results = await processor.processGraph(
+            {
+              settings: await fillMissingSettingsFromEnvironmentVariables(
+                savedSettings,
+                globalRivetNodeRegistry.getPlugins(),
+              ),
+              nativeApi: new TauriNativeApi(),
+              datasetProvider,
+            },
+            {},
+            contextValues,
+          );
         }
 
-        setLastRecordingState(recorder.serialize());
-
-        console.log(results);
+        if (recordExecutions) {
+          setLastRecordingState(recorder.serialize());
+        }
       } catch (e) {
         console.log(e);
       }
@@ -170,6 +198,7 @@ export function useLocalExecutor() {
           },
           runGraph: async (project, graphId, inputs) => {
             const processor = new GraphProcessor(project, graphId);
+            processor.executor = 'browser';
             attachGraphEvents(processor);
             return processor.processGraph(
               {
@@ -178,6 +207,7 @@ export function useLocalExecutor() {
                   globalRivetNodeRegistry.getPlugins(),
                 ),
                 nativeApi: new TauriNativeApi(),
+                datasetProvider,
               },
               inputs,
             );

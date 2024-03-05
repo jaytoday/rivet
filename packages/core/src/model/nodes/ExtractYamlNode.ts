@@ -1,12 +1,20 @@
-import { ChartNode, NodeId, NodeInputDefinition, PortId, NodeOutputDefinition } from '../NodeBase.js';
-import { nanoid } from 'nanoid';
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { DataValue } from '../DataValue.js';
+import {
+  type ChartNode,
+  type NodeId,
+  type NodeInputDefinition,
+  type PortId,
+  type NodeOutputDefinition,
+} from '../NodeBase.js';
+import { nanoid } from 'nanoid/non-secure';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import { type DataValue } from '../DataValue.js';
 import yaml from 'yaml';
 import { expectType } from '../../utils/expectType.js';
 import { JSONPath } from 'jsonpath-plus';
 import { dedent } from 'ts-dedent';
-import { EditorDefinition, NodeBodySpec, coerceType } from '../../index.js';
+import { type EditorDefinition, type NodeBodySpec } from '../../index.js';
+import { coerceType } from '../../utils/coerceType.js';
 
 export type ExtractYamlNode = ChartNode<'extractYaml', ExtractYamlNodeData>;
 
@@ -46,6 +54,7 @@ export class ExtractYamlNodeImpl extends NodeImpl<ExtractYamlNode> {
         title: 'Input',
         dataType: 'string',
         required: true,
+        coerced: false,
       },
     ];
 
@@ -115,8 +124,8 @@ export class ExtractYamlNodeImpl extends NodeImpl<ExtractYamlNode> {
         this.data.useObjectPathInput
           ? 'Path: (Using Input)'
           : this.data.objectPath
-          ? `Path: ${this.data.objectPath}`
-          : ``
+            ? `Path: ${this.data.objectPath}`
+            : ``
       }
     `;
   }
@@ -220,14 +229,14 @@ export class ExtractYamlNodeImpl extends NodeImpl<ExtractYamlNode> {
               value: undefined,
             }
           : this.data.objectPath
-          ? {
-              type: 'any',
-              value: yamlObject,
-            }
-          : {
-              type: 'object',
-              value: yamlObject,
-            },
+            ? {
+                type: 'any',
+                value: yamlObject,
+              }
+            : {
+                type: 'object',
+                value: yamlObject,
+              },
       ['noMatch' as PortId]: {
         type: 'control-flow-excluded',
         value: undefined,

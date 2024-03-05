@@ -1,11 +1,20 @@
-import { NodeImpl, NodeUIData, nodeDefinition } from '../NodeImpl.js';
-import { ChartNode, NodeConnection, NodeId, NodeInputDefinition, NodeOutputDefinition, PortId } from '../NodeBase.js';
+import { NodeImpl, type NodeUIData } from '../NodeImpl.js';
+import { nodeDefinition } from '../NodeDefinition.js';
+import {
+  type ChartNode,
+  type NodeConnection,
+  type NodeId,
+  type NodeInputDefinition,
+  type NodeOutputDefinition,
+  type PortId,
+} from '../NodeBase.js';
 import { isArrayDataValue } from '../DataValue.js';
-import { nanoid } from 'nanoid';
+import { nanoid } from 'nanoid/non-secure';
 import { coerceType, coerceTypeOptional, inferType } from '../../utils/coerceType.js';
-import { Inputs, Outputs } from '../GraphProcessor.js';
+import { type Inputs, type Outputs } from '../GraphProcessor.js';
 import { dedent } from 'ts-dedent';
-import { EditorDefinition } from '../EditorDefinition.js';
+import { type EditorDefinition } from '../EditorDefinition.js';
+import { handleEscapeCharacters } from '../../utils/index.js';
 
 export type JoinNode = ChartNode<'join', JoinNodeData>;
 
@@ -105,12 +114,12 @@ export class JoinNodeImpl extends NodeImpl<JoinNode> {
     return this.data.useJoinStringInput
       ? '(Join value is input)'
       : this.data.joinString === '\n'
-      ? '(New line)'
-      : this.data.joinString === '\t'
-      ? '(Tab)'
-      : this.data.joinString === ' '
-      ? '(Space)'
-      : this.data.joinString;
+        ? '(New line)'
+        : this.data.joinString === '\t'
+          ? '(Tab)'
+          : this.data.joinString === ' '
+            ? '(Space)'
+            : this.data.joinString;
   }
 
   static getUIData(): NodeUIData {
@@ -131,6 +140,8 @@ export class JoinNodeImpl extends NodeImpl<JoinNode> {
       ? coerceTypeOptional(inputs['joinString' as PortId], 'string') ?? this.data.joinString
       : this.data.joinString;
 
+    const normalizedJoinString = handleEscapeCharacters(joinString);
+
     const inputKeys = Object.keys(inputs).filter((key) => key.startsWith('input'));
 
     const inputValueStrings: string[] = [];
@@ -146,7 +157,7 @@ export class JoinNodeImpl extends NodeImpl<JoinNode> {
       }
     }
 
-    const outputValue = inputValueStrings.join(joinString);
+    const outputValue = inputValueStrings.join(normalizedJoinString);
 
     return {
       ['output' as PortId]: {

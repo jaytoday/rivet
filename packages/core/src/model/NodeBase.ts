@@ -1,6 +1,6 @@
-import { Opaque } from 'type-fest';
-import { DataType } from './DataValue.js';
-import { GraphId } from '../index.js';
+import type { Opaque } from 'type-fest';
+import type { DataType } from './DataValue.js';
+import type { GraphId } from '../index.js';
 
 /** Unique in a NodeGraph. */
 export type NodeId = Opaque<string, 'NodeId'>;
@@ -24,6 +24,9 @@ export interface NodeBase {
 
   isSplitRun?: boolean;
 
+  /** When splitting, should the executions be ran sequentially instead of in parallel? */
+  isSplitSequential?: boolean;
+
   splitRunMax?: number;
 
   /** The visual data of the node, including its position. Visual data does not affect its processing. */
@@ -36,6 +39,12 @@ export interface NodeBase {
 
     width?: number;
 
+    /** The accent color of the node in the UI. */
+    color?: {
+      border: string;
+      bg: string;
+    };
+
     /** The z-index, the last grabbed node is on top of all others. */
     zIndex?: number;
   };
@@ -47,6 +56,9 @@ export interface NodeBase {
   variants?: ChartNodeVariant<unknown>[];
 
   tests?: NodeTestGroup[];
+
+  /** If true, the node is disabled and effectively "not ran" */
+  disabled?: boolean;
 }
 
 /** Base type for a typed node. */
@@ -95,6 +107,12 @@ export type NodeInputDefinition = {
 
   /** The default value of the input, if it is not connected to an output. */
   defaultValue?: unknown;
+
+  /** User-facing description of the port. */
+  description?: string;
+
+  /** Will the input value attempt to be coerced into the desired type? */
+  coerced?: boolean;
 };
 
 /** Represents an output definition of a node. */
@@ -113,6 +131,9 @@ export type NodeOutputDefinition = {
 
   /** The default value of the output. Some outputs just have a fixed value. */
   defaultValue?: unknown;
+
+  /** User-facing description of the port. */
+  description?: string;
 };
 
 /** Represents a connection between two nodes. */

@@ -1,5 +1,5 @@
 import { css } from '@emotion/react';
-import { FC } from 'react';
+import { type FC } from 'react';
 import { useMarkdown } from '../../hooks/useMarkdown';
 import Button from '@atlaskit/button';
 import { useOpenUrl } from '../../hooks/useOpenUrl';
@@ -64,7 +64,7 @@ export const NoTestCasesSplash: FC<{
       <div className="content">
         <div className="content-markdown" dangerouslySetInnerHTML={contentHtml} />
         <div className="buttons">
-          <Button appearance="primary" onClick={onCreateNewTestCase}>
+          <Button appearance="primary" onClick={() => onCreateNewTestCase?.()}>
             Create Test Case
           </Button>
           <Button appearance="default" onClick={viewDocumentation}>

@@ -1,29 +1,31 @@
-import { Settings } from '../../index.js';
-import { EmbeddingGenerator } from '../EmbeddingGenerator.js';
-import * as openai from 'openai';
+import { type Settings } from '../../index.js';
+import { type EmbeddingGenerator } from '../EmbeddingGenerator.js';
+import { OpenAI } from 'openai';
+
+type OpenAIOptions = Pick<OpenAI.EmbeddingCreateParams, 'model' | 'dimensions' >
 
 export class OpenAIEmbeddingGenerator implements EmbeddingGenerator {
-  #settings;
+  readonly #settings;
 
   constructor(settings: Settings) {
     this.#settings = settings;
   }
 
-  async generateEmbedding(text: string): Promise<number[]> {
-    const config = new openai.Configuration({
+  async generateEmbedding(text: string, options?: OpenAIOptions): Promise<number[]> {
+    const api = new OpenAI({
       apiKey: this.#settings.openAiKey,
       organization: this.#settings.openAiOrganization,
+      dangerouslyAllowBrowser: true, // It's fine in Rivet
     });
 
-    const api = new openai.OpenAIApi(config);
-
-    const response = await api.createEmbedding({
+    const response = await api.embeddings.create({
       input: text,
-      model: 'text-embedding-ada-002',
+      model: options?.model ?? 'text-embedding-ada-002',
+      dimensions: options?.dimensions
     });
 
-    const { embedding } = response.data.data[0]!;
+    const embeddings = response.data;
 
-    return embedding;
+    return embeddings[0]!.embedding;
   }
 }
